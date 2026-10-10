@@ -13,7 +13,7 @@ import uuid
 from datetime import datetime, timezone
 from src.f1_data import get_race_weekends_by_year, get_race_weekends_by_place, get_all_unique_race_names, load_session
 from src.gui.settings_dialog import SettingsDialog
-from src.gui.theme import Backdrop, fade_in
+from src.gui.theme import Backdrop, fade_in, logo_pixmap
 from src.lib.season import get_season
 
 # Worker thread to fetch schedule without blocking UI
@@ -67,6 +67,9 @@ class RaceSelectionWindow(QMainWindow):
         header_layout.setSpacing(10)
         brand_label = QLabel("F1")
         brand_label.setObjectName("brand")
+        f1_logo = logo_pixmap("f1", 22)
+        if f1_logo is not None:
+            brand_label.setPixmap(f1_logo)
         header_label = QLabel("Race Replay")
         header_label.setObjectName("title")
         settings_btn = QPushButton("Settings")

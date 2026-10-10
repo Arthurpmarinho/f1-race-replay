@@ -2,8 +2,8 @@
 
 import os
 
-from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QPointF, Qt
-from PySide6.QtGui import QColor, QFont, QLinearGradient, QPainter, QRadialGradient
+from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QPointF, QSize, Qt
+from PySide6.QtGui import QColor, QFont, QIcon, QLinearGradient, QPainter, QRadialGradient
 from PySide6.QtWidgets import QGraphicsOpacityEffect, QWidget
 
 F1_RED = "#E10600"
@@ -13,6 +13,8 @@ TEXT_DIM = "rgba(235, 238, 245, 0.55)"
 CHEVRON = os.path.normpath(
     os.path.join(os.path.dirname(__file__), "..", "..", "images", "controls", "chevron-down.svg")
 ).replace("\\", "/")
+
+LOGO_DIR = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "..", "images", "logos"))
 
 FONT_FAMILIES = ["Segoe UI Variable Display", "Segoe UI", "SF Pro Display", "Inter", "Helvetica Neue", "Arial"]
 
@@ -193,3 +195,14 @@ def fade_in(widget, duration=220):
     anim.finished.connect(lambda: widget.setGraphicsEffect(None))
     anim.start()
     widget._fade_anim = anim
+
+
+def logo_pixmap(name, height):
+    """Logo from images/logos/<name>.svg or .png, or None when the file isn't there."""
+    for ext in (".svg", ".png"):
+        path = os.path.join(LOGO_DIR, name + ext)
+        if os.path.exists(path):
+            icon = QIcon(path)
+            size = icon.actualSize(QSize(height * 20, height))
+            return icon.pixmap(size)
+    return None
