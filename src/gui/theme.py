@@ -2,10 +2,12 @@
 
 import os
 
-from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QPointF, QSize, Qt
-from PySide6.QtGui import QColor, QFont, QFontDatabase, QIcon, QLinearGradient, QPainter, QRadialGradient
+from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QPointF, QRectF, QSize, Qt
+from PySide6.QtSvg import QSvgRenderer
+from PySide6.QtGui import QColor, QFont, QFontDatabase, QIcon, QLinearGradient, QPainter, QPainterPath, QPixmap, QRadialGradient
 from PySide6.QtWidgets import QGraphicsOpacityEffect, QWidget
 
+from src.lib.flags import flag_path
 from src.lib.fonts import display_font_family, font_family, font_files
 
 F1_RED = "#E10600"
@@ -213,3 +215,22 @@ def logo_pixmap(name, height):
             size = icon.actualSize(QSize(height * 20, height))
             return icon.pixmap(size)
     return None
+
+
+def flag_pixmap(country, width, height, radius=3):
+    """Flag with rounded corners, or None when the country has no flag file."""
+    path = flag_path(country)
+    if path is None:
+        return None
+    ratio = 2  # render at 2x so it stays sharp on high-DPI screens
+    pixmap = QPixmap(width * ratio, height * ratio)
+    pixmap.fill(Qt.transparent)
+    p = QPainter(pixmap)
+    p.setRenderHint(QPainter.Antialiasing)
+    clip = QPainterPath()
+    clip.addRoundedRect(QRectF(0, 0, width * ratio, height * ratio), radius * ratio, radius * ratio)
+    p.setClipPath(clip)
+    QSvgRenderer(path).render(p, QRectF(0, 0, width * ratio, height * ratio))
+    p.end()
+    pixmap.setDevicePixelRatio(ratio)
+    return pixmap

@@ -3,7 +3,8 @@ from PySide6.QtWidgets import (
     QLabel, QComboBox, QPushButton, QTreeWidget, QTreeWidgetItem, QMessageBox, QFrame
 )
 from PySide6.QtWidgets import QProgressDialog
-from PySide6.QtCore import QThread, Signal, Qt, QTimer
+from PySide6.QtCore import QThread, Signal, Qt, QTimer, QSize
+from PySide6.QtGui import QIcon, QPixmap
 #from PySide6.QtGui import QPixmap, QFont
 import sys
 import os
@@ -13,7 +14,7 @@ import uuid
 from datetime import datetime, timezone
 from src.f1_data import get_race_weekends_by_year, get_race_weekends_by_place, get_all_unique_race_names, load_session
 from src.gui.settings_dialog import SettingsDialog
-from src.gui.theme import Backdrop, fade_in, logo_pixmap
+from src.gui.theme import Backdrop, fade_in, flag_pixmap, logo_pixmap
 from src.lib.season import get_season
 
 # Worker thread to fetch schedule without blocking UI
@@ -124,6 +125,7 @@ class RaceSelectionWindow(QMainWindow):
         self.schedule_tree.setRootIsDecorated(False)
         self.schedule_tree.setCursor(Qt.PointingHandCursor)
         self.schedule_tree.setVerticalScrollMode(QTreeWidget.ScrollPerPixel)
+        self.schedule_tree.setIconSize(QSize(22, 16))
         schedule_layout.addWidget(self.schedule_tree)
         content_layout.addWidget(schedule_card, 3)
         self.schedule_tree.setColumnWidth(2, 180)
@@ -141,11 +143,15 @@ class RaceSelectionWindow(QMainWindow):
         header_lbl.setObjectName("sectionTitle")
         self.session_panel_layout.addWidget(header_lbl)
 
+        self.event_flag_label = QLabel()
         self.event_name_label = QLabel()
         self.event_name_label.setObjectName("eventName")
         self.event_name_label.setWordWrap(True)
         self.event_info_label = QLabel()
         self.event_info_label.setObjectName("muted")
+        self.session_panel_layout.addSpacing(4)
+        self.session_panel_layout.addWidget(self.event_flag_label)
+        self.session_panel_layout.addSpacing(4)
         self.session_panel_layout.addWidget(self.event_name_label)
         self.session_panel_layout.addWidget(self.event_info_label)
         self.session_panel_layout.addSpacing(10)
@@ -244,6 +250,9 @@ class RaceSelectionWindow(QMainWindow):
             date = str(event.get("date", ""))
 
             event_item = QTreeWidgetItem([round_str, name, country, date])
+            flag = flag_pixmap(country, 22, 16)
+            if flag is not None:
+                event_item.setIcon(2, QIcon(flag))
             event_item.setData(0, Qt.UserRole, event)
             self.schedule_tree.addTopLevelItem(event_item)
 
@@ -260,6 +269,9 @@ class RaceSelectionWindow(QMainWindow):
         ev = item.data(0, Qt.UserRole)
         # ensure the sessions panel is visible when a race is selected
         self.event_name_label.setText(str(ev.get("event_name", "")))
+        flag = flag_pixmap(ev.get("country"), 42, 30, radius=5)
+        self.event_flag_label.setPixmap(flag if flag is not None else QPixmap())
+        self.event_flag_label.setVisible(flag is not None)
         info = [str(ev.get(k)) for k in ("country", "date") if ev.get(k)]
         self.event_info_label.setText("  ·  ".join(info))
         self.session_panel.show()
