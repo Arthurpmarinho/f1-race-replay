@@ -3,8 +3,10 @@
 import os
 
 from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QPointF, QSize, Qt
-from PySide6.QtGui import QColor, QFont, QIcon, QLinearGradient, QPainter, QRadialGradient
+from PySide6.QtGui import QColor, QFont, QFontDatabase, QIcon, QLinearGradient, QPainter, QRadialGradient
 from PySide6.QtWidgets import QGraphicsOpacityEffect, QWidget
+
+from src.lib.fonts import display_font_family, font_family, font_files
 
 F1_RED = "#E10600"
 TEXT = "#F2F3F5"
@@ -15,6 +17,8 @@ CHEVRON = os.path.normpath(
 ).replace("\\", "/")
 
 LOGO_DIR = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "..", "images", "logos"))
+
+DISPLAY_FONT = display_font_family()
 
 FONT_FAMILIES = ["Segoe UI Variable Display", "Segoe UI", "SF Pro Display", "Inter", "Helvetica Neue", "Arial"]
 
@@ -38,14 +42,15 @@ QLabel#brand {{
     font-weight: 800;
     font-style: italic;
 }}
-QLabel#title {{ font-size: 26px; font-weight: 600; }}
+QLabel#title {{ font-family: "{DISPLAY_FONT}"; font-size: 22px; }}
 QLabel#sectionTitle {{
+    font-family: "{DISPLAY_FONT}";
     color: {TEXT_DIM};
     font-size: 11px;
     font-weight: 600;
     letter-spacing: 1.5px;
 }}
-QLabel#eventName {{ font-size: 17px; font-weight: 600; }}
+QLabel#eventName {{ font-family: "{DISPLAY_FONT}"; font-size: 14px; }}
 QLabel#muted {{ color: {TEXT_DIM}; font-size: 12px; }}
 
 QPushButton {{
@@ -150,8 +155,10 @@ QToolTip {{
 
 
 def apply_theme(app):
+    for path in font_files():
+        QFontDatabase.addApplicationFont(path)
     font = QFont()
-    font.setFamilies(FONT_FAMILIES)
+    font.setFamilies([font_family()] + FONT_FAMILIES)
     font.setPixelSize(13)
     app.setFont(font)
     app.setStyle("Fusion")

@@ -3,6 +3,7 @@ from typing import List, Literal, Tuple, Optional
 from typing import Sequence, Optional, Tuple
 from src.lib.time import format_time
 from src.lib.team_logos import team_logo_path
+from src.lib.fonts import display_font_family
 import numpy as np
 import pandas as pd
 import fastf1.plotting
@@ -272,6 +273,7 @@ class LeaderboardComponent(BaseComponent):
         self.computed_gaps = {}
         self.computed_neighbor_gaps = {}
         self._team_logos = None  # driver code -> texture, filled on first draw
+        self._display_font = (display_font_family(), "calibri", "arial")
 
     def _load_team_logos(self, window):
         self._team_logos = {}
@@ -350,7 +352,7 @@ class LeaderboardComponent(BaseComponent):
             return
         self.selected = getattr(window, "selected_drivers", [])
         leaderboard_y = window.height - 40
-        arcade.Text("Leaderboard", self.x, leaderboard_y, arcade.color.WHITE, 20, bold=True, anchor_x="left", anchor_y="top").draw()
+        arcade.Text("Leaderboard", self.x, leaderboard_y, arcade.color.WHITE, 15, font_name=self._display_font, anchor_x="left", anchor_y="top").draw()
         # sync with window state if present
         self.show_gaps = getattr(window, "leaderboard_show_gaps", self.show_gaps)
         self.show_neighbor_gaps = getattr(window, "leaderboard_show_neighbor_gaps", self.show_neighbor_gaps)
@@ -435,13 +437,13 @@ class LeaderboardComponent(BaseComponent):
                 arcade.draw_texture_rect(logo, arcade.XYWH(left_x + 13, top_y - 12, logo.width * scale, logo.height * scale))
             name_x = left_x + 32 if self._team_logos else left_x
 
-            arcade.Text(driver_text,name_x,top_y,text_color,16,anchor_x="left",anchor_y="top").draw()
+            arcade.Text(driver_text,name_x,top_y - 1,text_color,13,font_name=self._display_font,anchor_x="left",anchor_y="top").draw()
 
             #PIT indicator in white
-            if pit_text:arcade.Text(pit_text, name_x + 80, top_y,arcade.color.WHITE,16,anchor_x="left",anchor_y="top").draw()
+            if pit_text:arcade.Text(pit_text, name_x + 84, top_y,arcade.color.WHITE,16,anchor_x="left",anchor_y="top").draw()
 
             #OUT indicator in red
-            if out_text: arcade.Text(out_text, name_x + 80, top_y, (155,17,30), 16, anchor_x="left", anchor_y="top",bold=True).draw()
+            if out_text: arcade.Text(out_text, name_x + 84, top_y, (155,17,30), 16, anchor_x="left", anchor_y="top",bold=True).draw()
 
             # Gap display (if enabled)
             if getattr(self, "show_neighbor_gaps", False):

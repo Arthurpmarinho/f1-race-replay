@@ -26,3 +26,6 @@ still_frame.png
 # Trademarked logos, kept locally
 images/logos/*
 !images/logos/README.md
+
+# Formula1 font files (proprietary), kept locally
+fonts/Formula1*
