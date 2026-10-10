@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QLabel, QComboBox, QPushButton, QTreeWidget, QTreeWidgetItem, QMessageBox
+    QLabel, QComboBox, QPushButton, QTreeWidget, QTreeWidgetItem, QMessageBox, QFrame
 )
 from PySide6.QtWidgets import QProgressDialog
 from PySide6.QtCore import QThread, Signal, Qt, QTimer
@@ -13,6 +13,7 @@ import uuid
 from datetime import datetime, timezone
 from src.f1_data import get_race_weekends_by_year, get_race_weekends_by_place, get_all_unique_race_names, load_session
 from src.gui.settings_dialog import SettingsDialog
+from src.gui.theme import Backdrop, fade_in
 from src.lib.season import get_season
 
 # Worker thread to fetch schedule without blocking UI
@@ -53,34 +54,36 @@ class RaceSelectionWindow(QMainWindow):
         self.setWindowState(self.windowState())
 
     def _setup_ui(self):
-        central_widget = QWidget()
+        central_widget = Backdrop()
         self.setCentralWidget(central_widget)
 
         main_layout = QVBoxLayout()
+        main_layout.setContentsMargins(28, 22, 28, 28)
+        main_layout.setSpacing(18)
         central_widget.setLayout(main_layout)
 
-        # Header (title)
+        # Header
         header_layout = QHBoxLayout()
-        header_label = QLabel("F1 Race Replay 🏎️")
-        font = header_label.font()
-        settings_btn = QPushButton("⚙ Settings")
+        header_layout.setSpacing(10)
+        brand_label = QLabel("F1")
+        brand_label.setObjectName("brand")
+        header_label = QLabel("Race Replay")
+        header_label.setObjectName("title")
+        settings_btn = QPushButton("Settings")
         settings_btn.setCursor(Qt.PointingHandCursor)
-        settings_btn.setFixedHeight(32)
         settings_btn.clicked.connect(self.open_settings)
-        font.setPointSize(18)
-        font.setBold(True)
-        header_label.setFont(font)
-        header_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        
+
+        header_layout.addWidget(brand_label)
         header_layout.addWidget(header_label)
         header_layout.addStretch()
         header_layout.addWidget(settings_btn)
         main_layout.addLayout(header_layout)
 
-        # Year selection
-        year_layout = QHBoxLayout()
-        year_label = QLabel("Select Year:")
+        # Filters
+        filter_layout = QHBoxLayout()
+        filter_layout.setSpacing(12)
         self.year_combo = QComboBox()
+        self.year_combo.setCursor(Qt.PointingHandCursor)
         self.year_combo.addItem("All Years")
 
         for year in range(2018, self.current_year + 1):
@@ -89,48 +92,65 @@ class RaceSelectionWindow(QMainWindow):
         self.year_combo.setCurrentText(str(self.current_year))
         self.year_combo.currentTextChanged.connect(self.load_by_year)
 
-        year_layout.addWidget(year_label)
-        year_layout.addWidget(self.year_combo)
-        main_layout.addLayout(year_layout)
-
-        #Race Selection
-        place_layout=QHBoxLayout()
-        place_label=QLabel("Select Race:")
-        self.place_combo=QComboBox()
+        self.place_combo = QComboBox()
+        self.place_combo.setCursor(Qt.PointingHandCursor)
         self.place_combo.addItem("All Races")
         self.place_combo.addItems(get_all_unique_race_names())
         self.place_combo.currentTextChanged.connect(self.load_by_place)
 
-
-        place_layout.addWidget(place_label)
-        place_layout.addWidget(self.place_combo)
-        main_layout.addLayout(place_layout)
+        filter_layout.addWidget(self.year_combo, 1)
+        filter_layout.addWidget(self.place_combo, 2)
+        filter_layout.addStretch(3)
+        main_layout.addLayout(filter_layout)
 
         # Main content: left = schedule, right = session list
         content_layout = QHBoxLayout()
+        content_layout.setSpacing(18)
 
-        # Schedule tree (left)
+        # Schedule (left)
+        schedule_card = QFrame()
+        schedule_card.setObjectName("glass")
+        schedule_layout = QVBoxLayout(schedule_card)
+        schedule_layout.setContentsMargins(18, 16, 18, 10)
+        calendar_lbl = QLabel("CALENDAR")
+        calendar_lbl.setObjectName("sectionTitle")
+        schedule_layout.addWidget(calendar_lbl)
+
         self.schedule_tree = QTreeWidget()
-        self.schedule_tree.setHeaderLabels(["Round", "Event", "Country", "Start Date"])
+        self.schedule_tree.setHeaderLabels(["ROUND", "EVENT", "COUNTRY", "DATE"])
         self.schedule_tree.setRootIsDecorated(False)
-        content_layout.addWidget(self.schedule_tree, 3)
+        self.schedule_tree.setCursor(Qt.PointingHandCursor)
+        self.schedule_tree.setVerticalScrollMode(QTreeWidget.ScrollPerPixel)
+        schedule_layout.addWidget(self.schedule_tree)
+        content_layout.addWidget(schedule_card, 3)
         self.schedule_tree.setColumnWidth(2, 180)
 
         # Session panel (right)
-        self.session_panel = QWidget()
+        self.session_panel = QFrame()
+        self.session_panel.setObjectName("glass")
+        self.session_panel.setMinimumWidth(260)
         self.session_panel_layout = QVBoxLayout()
+        self.session_panel_layout.setContentsMargins(18, 16, 18, 18)
+        self.session_panel_layout.setSpacing(6)
         self.session_panel.setLayout(self.session_panel_layout)
         self.session_panel_layout.setAlignment(Qt.AlignTop)
-        header_lbl = QLabel("Sessions")
-        hdr_font = header_lbl.font()
-        hdr_font.setPointSize(14)
-        hdr_font.setBold(True)
-        header_lbl.setFont(hdr_font)
+        header_lbl = QLabel("SESSIONS")
+        header_lbl.setObjectName("sectionTitle")
         self.session_panel_layout.addWidget(header_lbl)
 
-        # placeholder spacer
+        self.event_name_label = QLabel()
+        self.event_name_label.setObjectName("eventName")
+        self.event_name_label.setWordWrap(True)
+        self.event_info_label = QLabel()
+        self.event_info_label.setObjectName("muted")
+        self.session_panel_layout.addWidget(self.event_name_label)
+        self.session_panel_layout.addWidget(self.event_info_label)
+        self.session_panel_layout.addSpacing(10)
+
         self.session_list_container = QWidget()
         self.session_list_layout = QVBoxLayout()
+        self.session_list_layout.setContentsMargins(0, 0, 0, 0)
+        self.session_list_layout.setSpacing(8)
         self.session_list_container.setLayout(self.session_list_layout)
         self.session_panel_layout.addWidget(self.session_list_container)
 
@@ -236,10 +256,11 @@ class RaceSelectionWindow(QMainWindow):
     def on_race_clicked(self, item, column):
         ev = item.data(0, Qt.UserRole)
         # ensure the sessions panel is visible when a race is selected
-        try:
-            self.session_panel.show()
-        except Exception:
-            pass
+        self.event_name_label.setText(str(ev.get("event_name", "")))
+        info = [str(ev.get(k)) for k in ("country", "date") if ev.get(k)]
+        self.event_info_label.setText("  ·  ".join(info))
+        self.session_panel.show()
+        fade_in(self.session_panel)
         # determine sessions to show
         ev_type = (ev.get("type") or "").lower()
         sessions = ["Qualifying", "Race"]
@@ -318,13 +339,16 @@ class RaceSelectionWindow(QMainWindow):
                 available_sessions.append(s)
 
         if not available_sessions:
-            label = QLabel("Sessions not available")
-            label.setAlignment(Qt.AlignCenter)
+            label = QLabel("Sessions not available yet")
+            label.setObjectName("muted")
             self.session_list_layout.addWidget(label)
         else:
             for s in sessions:
                 if s in available_sessions:
                     btn = QPushButton(s)
+                    btn.setObjectName("session")
+                    btn.setProperty("primary", s == "Race")
+                    btn.setCursor(Qt.PointingHandCursor)
                     btn.clicked.connect(
                         lambda _, sname=s, e=ev: self._on_session_button_clicked(e, sname)
                     )

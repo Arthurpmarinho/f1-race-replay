@@ -60,7 +60,7 @@ class SettingsDialog(QDialog):
             "This is where FastF1 stores downloaded session data.\n"
             "Changing this location will not move existing cached data."
         )
-        cache_help.setStyleSheet("color: gray; font-size: 11px;")
+        cache_help.setObjectName("muted")
         cache_help.setWordWrap(True)
         cache_layout.addRow("", cache_help)
 
@@ -80,7 +80,7 @@ class SettingsDialog(QDialog):
             "This is where pre-processed telemetry data is stored.\n"
             "Helps speed up loading previously viewed sessions."
         )
-        computed_help.setStyleSheet("color: gray; font-size: 11px;")
+        computed_help.setObjectName("muted")
         computed_help.setWordWrap(True)
         cache_layout.addRow("", computed_help)
 
@@ -99,6 +99,7 @@ class SettingsDialog(QDialog):
 
         # Dialog buttons
         button_box = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
+        button_box.button(QDialogButtonBox.Save).setObjectName("primary")
         button_box.accepted.connect(self._save_settings)
         button_box.rejected.connect(self.reject)
         layout.addWidget(button_box)
