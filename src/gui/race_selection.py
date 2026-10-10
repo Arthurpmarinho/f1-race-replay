@@ -2,7 +2,6 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QComboBox, QPushButton, QTreeWidget, QTreeWidgetItem, QMessageBox, QFrame
 )
-from PySide6.QtWidgets import QProgressDialog
 from PySide6.QtCore import QThread, Signal, Qt, QTimer, QSize
 from PySide6.QtGui import QIcon, QPixmap
 #from PySide6.QtGui import QPixmap, QFont
@@ -14,7 +13,8 @@ import uuid
 from datetime import datetime, timezone
 from src.f1_data import get_race_weekends_by_year, get_race_weekends_by_place, get_all_unique_race_names, load_session
 from src.gui.settings_dialog import SettingsDialog
-from src.gui.theme import Backdrop, fade_in, flag_pixmap, logo_pixmap
+from src.gui.theme import Backdrop, flag_pixmap, logo_pixmap
+from src.gui.motion import AnimatedWindow, LoadingDialog, SpeedLoader, cascade, slide_in
 from src.lib.season import get_season
 
 # Worker thread to fetch schedule without blocking UI
@@ -39,7 +39,7 @@ class FetchScheduleWorker(QThread):
         except Exception as e:
             self.error.emit(str(e))
 
-class RaceSelectionWindow(QMainWindow):
+class RaceSelectionWindow(AnimatedWindow, QMainWindow):
     def __init__(self):
         super().__init__()
         self.worker = None
@@ -120,6 +120,10 @@ class RaceSelectionWindow(QMainWindow):
         calendar_lbl.setObjectName("sectionTitle")
         schedule_layout.addWidget(calendar_lbl)
 
+        self.schedule_loader = SpeedLoader()
+        self.schedule_loader.hide()
+        schedule_layout.addWidget(self.schedule_loader)
+
         self.schedule_tree = QTreeWidget()
         self.schedule_tree.setHeaderLabels(["ROUND", "EVENT", "COUNTRY", "DATE"])
         self.schedule_tree.setRootIsDecorated(False)
@@ -195,6 +199,7 @@ class RaceSelectionWindow(QMainWindow):
         #Year filter
         if year is not None:
             self.loading_session = True
+            self.schedule_loader.show()
             self.worker = FetchScheduleWorker(int(year))
             self.worker.result.connect(self.populate_schedule)
             self.worker.error.connect(self.show_error)
@@ -242,6 +247,7 @@ class RaceSelectionWindow(QMainWindow):
         self.load_schedule(events=events)
 
     def populate_schedule(self, events):
+        self.schedule_loader.hide()
         for event in events:
             # Ensure all columns are strings (QTreeWidgetItem expects text)
             round_str = str(event.get("round_number", ""))
@@ -264,6 +270,7 @@ class RaceSelectionWindow(QMainWindow):
             pass
 
         self.loading_session = False
+        slide_in(self.schedule_tree, dy=12)
 
     def on_race_clicked(self, item, column):
         ev = item.data(0, Qt.UserRole)
@@ -274,8 +281,11 @@ class RaceSelectionWindow(QMainWindow):
         self.event_flag_label.setVisible(flag is not None)
         info = [str(ev.get(k)) for k in ("country", "date") if ev.get(k)]
         self.event_info_label.setText("  ·  ".join(info))
+        was_visible = self.session_panel.isVisible()
         self.session_panel.show()
-        fade_in(self.session_panel)
+        if not was_visible:
+            self.centralWidget().layout().activate()
+            slide_in(self.session_panel, dx=28, dy=0)
         # determine sessions to show
         ev_type = (ev.get("type") or "").lower()
         sessions = ["Qualifying", "Race"]
@@ -357,7 +367,9 @@ class RaceSelectionWindow(QMainWindow):
             label = QLabel("Sessions not available yet")
             label.setObjectName("muted")
             self.session_list_layout.addWidget(label)
+            entries = [label]
         else:
+            entries = []
             for s in sessions:
                 if s in available_sessions:
                     btn = QPushButton(s)
@@ -368,6 +380,11 @@ class RaceSelectionWindow(QMainWindow):
                         lambda _, sname=s, e=ev: self._on_session_button_clicked(e, sname)
                     )
                     self.session_list_layout.addWidget(btn)
+                    entries.append(btn)
+
+        # Lay the new buttons out first so each one knows where to glide to.
+        self.centralWidget().layout().activate()
+        cascade(entries, dx=22, dy=0)
 
     def _on_session_button_clicked(self, ev, session_label):
         """Launch main.py in a separate process to run the selected session.
@@ -410,12 +427,7 @@ class RaceSelectionWindow(QMainWindow):
         if "--verbose" in sys.argv:
             cmd.append("--verbose")
         # Show a modal loading dialog and load the session in a background thread.
-        dlg = QProgressDialog("Loading session data...", None, 0, 0, self)
-        dlg.setWindowTitle("Loading")
-        dlg.setWindowModality(Qt.ApplicationModal)
-        dlg.setCancelButton(None)
-        dlg.setMinimumDuration(0)
-        dlg.setRange(0, 0)
+        dlg = LoadingDialog(f"{ev.get('event_name', '')}  ·  {session_label}", self)
         dlg.show()
         QApplication.processEvents()
 
@@ -453,6 +465,7 @@ class RaceSelectionWindow(QMainWindow):
                     self.error.emit(str(e))
 
         def _on_loaded(session_obj):
+            dlg.set_stage("Building the replay…")
             # create a unique ready-file path and pass it to the child
             ready_path = os.path.join(tempfile.gettempdir(), f"f1_ready_{uuid.uuid4().hex}")
             cmd_with_ready = list(cmd) + ["--ready-file", ready_path]
@@ -515,6 +528,7 @@ class RaceSelectionWindow(QMainWindow):
         self._session_worker = worker
         worker.start()
     def show_error(self, message):
+        self.schedule_loader.hide()
         QMessageBox.critical(self, "Error", f"Failed to load schedule: {message}")
         self.loading_session = False
 

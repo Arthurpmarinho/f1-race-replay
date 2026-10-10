@@ -5,6 +5,7 @@ Provides UI for configuring application settings like cache location.
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QCheckBox,
     QDialog,
     QDialogButtonBox,
     QFileDialog,
@@ -18,10 +19,11 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from src.gui.motion import AnimatedWindow
 from src.lib.settings import get_settings
 
 
-class SettingsDialog(QDialog):
+class SettingsDialog(AnimatedWindow, QDialog):
     """Dialog for configuring application settings."""
 
     def __init__(self, parent=None):
@@ -86,6 +88,18 @@ class SettingsDialog(QDialog):
 
         layout.addWidget(cache_group)
 
+        # Interface Group
+        ui_group = QGroupBox("Interface")
+        ui_layout = QVBoxLayout()
+        ui_group.setLayout(ui_layout)
+        self.animations_check = QCheckBox("Animated transitions")
+        ui_layout.addWidget(self.animations_check)
+        ui_help = QLabel("Fades and slides between windows. Turn off on slower computers.")
+        ui_help.setObjectName("muted")
+        ui_help.setWordWrap(True)
+        ui_layout.addWidget(ui_help)
+        layout.addWidget(ui_group)
+
         # Spacer
         layout.addStretch()
 
@@ -108,6 +122,7 @@ class SettingsDialog(QDialog):
         """Load current settings values into the UI."""
         self.cache_path_edit.setText(self.settings.cache_location)
         self.computed_path_edit.setText(self.settings.computed_data_location)
+        self.animations_check.setChecked(bool(self.settings.get("animations", True)))
 
     def _browse_cache_location(self):
         """Open a folder browser for cache location."""
@@ -171,6 +186,7 @@ class SettingsDialog(QDialog):
         # Save settings
         self.settings.cache_location = cache_path
         self.settings.computed_data_location = computed_path
+        self.settings.set("animations", self.animations_check.isChecked())
         self.settings.save()
 
         QMessageBox.information(
