@@ -24,6 +24,7 @@ MODULES = [
     "src.insights.tyre_strategy_window",
     "src.interfaces.qualifying",
     "src.interfaces.race_replay",
+    "src.lib.frames",
     "src.lib.season",
     "src.lib.settings",
     "src.lib.time",

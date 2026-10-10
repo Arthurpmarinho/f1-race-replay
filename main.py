@@ -1,4 +1,12 @@
-from src.f1_data import get_race_telemetry, enable_cache, get_circuit_rotation, load_session, get_quali_telemetry, get_practice_telemetry, list_rounds, list_sprints, _get_current_championship_standings, get_live_standings
+import sys
+import pyglet
+
+# pyglet checks for OpenGL errors after every GL call by default. It is a
+# debugging aid that costs a large share of every frame, so it is only
+# enabled with --debug-gl. Must be set before arcade/pyglet.gl is imported.
+pyglet.options["debug_gl"] = "--debug-gl" in sys.argv
+
+from src.f1_data import get_race_telemetry, enable_cache, get_track_layout, race_replay_cached, load_session, get_quali_telemetry, get_practice_telemetry, list_rounds, list_sprints, _get_current_championship_standings, get_live_standings
 from src.run_session import run_arcade_replay, launch_insights_menu, launch_telemetry_viewer
 from src.interfaces.qualifying import run_qualifying_replay
 from src.interfaces.practice import run_practice_replay
@@ -42,16 +50,20 @@ def _extract_circuit_name(event_name: str) -> str:
 
 
 def main(year=None, round_number=None, playback_speed=1, session_type='R', visible_hud=True, ready_file=None, show_telemetry_viewer=True):
+  # Enable cache for fastf1 (before loading, so the session is read from and
+  # saved to the configured cache folder)
+  enable_cache()
+
   print(f"Loading F1 {year} Round {round_number} Session '{session_type}'")
-  session = load_session(year, round_number, session_type)
+  # When the replay was already computed, the raw car/position telemetry is
+  # not needed and skipping it makes loading much faster.
+  needs_telemetry = session_type not in ('R', 'S') or not race_replay_cached(year, round_number, session_type)
+  session = load_session(year, round_number, session_type, telemetry=needs_telemetry)
   if session is None:
     print(f"Unable to load session '{session_type}'.")
     return
 
   print(f"Loaded session: {session.event['EventName']} - {session.event['RoundNumber']} - {session_type}")
-
-  # Enable cache for fastf1
-  enable_cache()
 
   if session_type == 'Q' or session_type == 'SQ':
 
@@ -90,38 +102,14 @@ def main(year=None, round_number=None, playback_speed=1, session_type='R', visib
 
     race_telemetry = get_race_telemetry(session, session_type=session_type)
 
-    # Get example lap for track layout
-    # Qualifying lap preferred for DRS zones (fallback to fastest race lap (no DRS data))
-    example_lap = None
-
-    try:
-        print("Attempting to load qualifying session for track layout...")
-        quali_session = load_session(year, round_number, 'Q')
-        if quali_session is not None and len(quali_session.laps) > 0:
-            fastest_quali = quali_session.laps.pick_fastest()
-            if fastest_quali is not None:
-                quali_telemetry = fastest_quali.get_telemetry()
-                if 'DRS' in quali_telemetry.columns:
-                    example_lap = quali_telemetry
-                    print(f"Using qualifying lap from driver {fastest_quali['Driver']} for DRS Zones")
-    except Exception as e:
-        print(f"Could not load qualifying session: {e}")
-
-    # fallback: Use fastest race lap
+    # Example lap for the track layout (qualifying lap preferred for DRS
+    # zones) and circuit rotation, cached after the first run
+    example_lap, circuit_rotation = get_track_layout(session, year, round_number)
     if example_lap is None:
-        fastest_lap = session.laps.pick_fastest()
-        if fastest_lap is not None:
-            example_lap = fastest_lap.get_telemetry()
-            print("Using fastest race lap (DRS detection may use speed-based fallback)")
-        else:
-            print("Error: No valid laps found in session")
-            return
+        print("Error: No valid laps found in session")
+        return
 
     drivers = session.drivers
-
-    # Get circuit rotation
-
-    circuit_rotation = get_circuit_rotation(session)
 
     # Prepare session info for display banner
     event_name = session.event.get('EventName', '')
