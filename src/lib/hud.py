@@ -30,6 +30,7 @@ DISPLAY_FONT = (display_font_family(), "calibri", "arial")
 _SHAPE_CACHE = OrderedDict()
 _SHAPE_CACHE_SIZE = 512
 _BACKDROP = None
+_FLAGS = {}
 
 
 def _rounded_points(left, bottom, width, height, radius, segments=6):
@@ -123,3 +124,42 @@ def _backdrop_texture():
 
 def draw_backdrop(window):
     arcade.draw_texture_rect(_backdrop_texture(), arcade.LBWH(0, 0, window.width, window.height))
+
+
+def flag_texture(country, width=27, height=18, radius=3):
+    """Country flag with rounded corners as a texture, or None when there is no flag for it.
+
+    The flag files are SVG, which arcade can't load, so they are rasterised once with Qt's SVG renderer.
+    """
+    key = (str(country or "").lower(), width, height, radius)
+    if key not in _FLAGS:
+        _FLAGS[key] = _render_flag(country, width, height, radius)
+    return _FLAGS[key]
+
+
+def _render_flag(country, width, height, radius):
+    from src.lib.flags import flag_path
+
+    path = flag_path(country)
+    if path is None:
+        return None
+    try:
+        from PySide6.QtCore import QRectF
+        from PySide6.QtGui import QImage, QPainter, QPainterPath
+        from PySide6.QtSvg import QSvgRenderer
+    except ImportError:
+        return None
+
+    scale = 2  # render at 2x so it stays sharp when scaled down
+    w, h = width * scale, height * scale
+    image = QImage(w, h, QImage.Format_RGBA8888)
+    image.fill(0)
+    painter = QPainter(image)
+    painter.setRenderHint(QPainter.Antialiasing)
+    clip = QPainterPath()
+    clip.addRoundedRect(QRectF(0, 0, w, h), radius * scale, radius * scale)
+    painter.setClipPath(clip)
+    QSvgRenderer(path).render(painter, QRectF(0, 0, w, h))
+    painter.end()
+    pil = Image.frombuffer("RGBA", (w, h), bytes(image.constBits()), "raw", "RGBA", image.bytesPerLine(), 1)
+    return arcade.Texture(pil.copy(), hash=f"flag-{path}-{width}x{height}")

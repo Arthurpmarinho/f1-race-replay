@@ -1311,12 +1311,17 @@ class SessionInfoComponent(BaseComponent):
         date = self.session_info.get('date', '')
         total_laps = self.session_info.get('total_laps', '')
 
-        # Line 1: event name, with a red accent mark in front
+        # Line 1: event name, with the country flag (or a red accent mark) in front
         title = str(event or circuit).upper()
-        title_label = cached_text(title, center_x + 9, top_y - 20, hud.TEXT, 12,
+        flag = hud.flag_texture(country)
+        mark_w = flag.width / 2 if flag else 4
+        title_label = cached_text(title, round(center_x + (mark_w + 10) / 2), top_y - 20, hud.TEXT, 12,
                                   font_name=hud.DISPLAY_FONT, anchor_x="center", anchor_y="center")
-        mark_x = center_x - title_label.content_width / 2 - 6
-        arcade.draw_lrbt_rectangle_filled(mark_x - 4, mark_x, top_y - 27, top_y - 13, hud.F1_RED)
+        mark_right = center_x - title_label.content_width / 2 + (mark_w + 10) / 2 - 10
+        if flag:
+            arcade.draw_texture_rect(flag, arcade.LBWH(round(mark_right - mark_w), top_y - 29, mark_w, flag.height / 2))
+        else:
+            arcade.draw_lrbt_rectangle_filled(mark_right - 4, mark_right, top_y - 27, top_y - 13, hud.F1_RED)
         title_label.draw()
 
         # Line 2: Circuit · Country · Year Round X · Date · X Laps
