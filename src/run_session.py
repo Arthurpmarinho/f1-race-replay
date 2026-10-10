@@ -5,7 +5,6 @@ import threading
 import time
 import arcade
 from src.interfaces.race_replay import F1RaceReplayWindow
-from src.insights.telemetry_stream_viewer import main as telemetry_viewer_main
 
 def run_arcade_replay(frames, track_statuses, example_lap, drivers, title,
                       playback_speed=1.0, driver_colors=None, team_colors=None, circuit_rotation=0.0, total_laps=None,

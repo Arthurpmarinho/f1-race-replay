@@ -70,9 +70,11 @@ class TyreDegradationIntegrator:
                 track_condition
             )
             
-            if health_data:
-                self._cache[cache_key] = health_data
-            
+            # Cache misses too: an empty answer (no laps yet, unknown
+            # compound) would otherwise re-filter the laps table for every
+            # driver on every frame.
+            self._cache[cache_key] = health_data
+
             return health_data
             
         except Exception as e:

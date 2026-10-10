@@ -6,21 +6,12 @@ import pyglet
 # enabled with --debug-gl. Must be set before arcade/pyglet.gl is imported.
 pyglet.options["debug_gl"] = "--debug-gl" in sys.argv
 
-from src.f1_data import get_race_telemetry, enable_cache, get_track_layout, race_replay_cached, load_session, get_quali_telemetry, get_practice_telemetry, list_rounds, list_sprints, _get_current_championship_standings, get_live_standings
-from src.run_session import run_arcade_replay, launch_insights_menu, launch_telemetry_viewer
-from src.interfaces.qualifying import run_qualifying_replay
-from src.interfaces.practice import run_practice_replay
-import sys
-from src.cli.race_selection import cli_load
-from src.gui.race_selection import RaceSelectionWindow
-from src.gui.theme import apply_theme
-from PySide6.QtWidgets import QApplication
-from src.lib.season import get_season
-from src.lib.fonts import use_app_font_in_arcade
 import logging
 import re
 
-use_app_font_in_arcade()
+# The race picker, the CLI and the replay each need different parts of the
+# app. Heavy modules (arcade, the replay windows, Qt widgets) are imported
+# where they are used so that each path starts as quickly as possible.
 
 
 def _extract_circuit_name(event_name: str) -> str:
@@ -54,6 +45,14 @@ def _extract_circuit_name(event_name: str) -> str:
 
 
 def main(year=None, round_number=None, playback_speed=1, session_type='R', visible_hud=True, ready_file=None, show_telemetry_viewer=True):
+  from src.f1_data import get_race_telemetry, enable_cache, get_track_layout, race_replay_cached, load_session, get_quali_telemetry, get_practice_telemetry, _get_current_championship_standings, get_live_standings
+  from src.run_session import run_arcade_replay, launch_insights_menu, launch_telemetry_viewer
+  from src.interfaces.qualifying import run_qualifying_replay
+  from src.interfaces.practice import run_practice_replay
+  from src.lib.fonts import use_app_font_in_arcade
+
+  use_app_font_in_arcade()
+
   # Enable cache for fastf1 (before loading, so the session is read from and
   # saved to the configured cache folder)
   enable_cache()
@@ -175,6 +174,7 @@ if __name__ == "__main__":
 
   if "--cli" in sys.argv:
     # Run the CLI
+    from src.cli.race_selection import cli_load
     cli_load()
     sys.exit(0)
 
@@ -182,6 +182,7 @@ if __name__ == "__main__":
     year_index = sys.argv.index("--year") + 1
     year = int(sys.argv[year_index])
   else:
+    from src.lib.season import get_season
     year = get_season()  # Default year
 
   if "--round" in sys.argv:
@@ -193,8 +194,10 @@ if __name__ == "__main__":
   visible_hud = "--no-hud" not in sys.argv
 
   if "--list-rounds" in sys.argv:
+    from src.f1_data import list_rounds
     list_rounds(year)
   elif "--list-sprints" in sys.argv:
+    from src.f1_data import list_sprints
     list_sprints(year)
 
   if "--playback-speed" in sys.argv:
@@ -237,6 +240,9 @@ if __name__ == "__main__":
     sys.exit(0)
 
   # Run the GUI
+  from PySide6.QtWidgets import QApplication
+  from src.gui.race_selection import RaceSelectionWindow
+  from src.gui.theme import apply_theme
 
   app = QApplication(sys.argv)
   apply_theme(app)

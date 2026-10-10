@@ -7,7 +7,6 @@ from src.lib.fonts import display_font_family
 from src.lib import hud
 import numpy as np
 import pandas as pd
-import fastf1.plotting
 import os
 from collections import OrderedDict
 from src.tyre_degradation_integration import (
@@ -19,6 +18,23 @@ from src.tyre_degradation_integration import (
 # the whole label, which is by far the most expensive part of drawing a frame.
 # Most HUD labels are identical from one frame to the next, so keep the
 # objects around and reuse them for the same text, position and style.
+_TEXTURE_CACHE = {}
+
+
+def load_ui_texture(path):
+    """Load an icon/logo texture once and share it between components.
+
+    UI textures are never used for collision, so the bounding box is used as
+    hit box; arcade's default algorithm scans every pixel of the image, which
+    made opening the replay window take seconds.
+    """
+    texture = _TEXTURE_CACHE.get(path)
+    if texture is None:
+        texture = arcade.load_texture(path, hit_box_algorithm=arcade.hitbox.algo_bounding_box)
+        _TEXTURE_CACHE[path] = texture
+    return texture
+
+
 _TEXT_CACHE = OrderedDict()
 _TEXT_CACHE_SIZE = 2048
 
@@ -67,7 +83,7 @@ class LegendComponent(BaseComponent):
                 if filename.lower().endswith(('.png', '.jpg', '.jpeg')):
                     texture_name = os.path.splitext(filename)[0]
                     texture_path = os.path.join(icons_folder, filename)
-                    self._control_icons_textures[texture_name] = arcade.load_texture(texture_path)
+                    self._control_icons_textures[texture_name] = load_ui_texture(texture_path)
         self.lines = ["Help (Click or 'H')"]
         
         self.controls_text_offset = 180
@@ -150,7 +166,7 @@ class WeatherComponent(BaseComponent):
                 if filename.lower().endswith(('.png', '.jpg', '.jpeg')):
                     texture_name = os.path.splitext(filename)[0]
                     texture_path = os.path.join(weather_folder, filename)
-                    self._weather_icon_textures[texture_name] = arcade.load_texture(texture_path)
+                    self._weather_icon_textures[texture_name] = load_ui_texture(texture_path)
 
         self._text = arcade.Text("", self.left + 12, 0, arcade.color.LIGHT_GRAY, 14, anchor_y="top")
 
@@ -241,7 +257,7 @@ class LeaderboardComponent(BaseComponent):
                 if filename.lower().endswith(('.png', '.jpg', '.jpeg')):
                     texture_name = os.path.splitext(filename)[0]
                     texture_path = os.path.join(tyres_folder, filename)
-                    self._tyre_textures[texture_name] = arcade.load_texture(texture_path)
+                    self._tyre_textures[texture_name] = load_ui_texture(texture_path)
         self.computed_gaps = {}
         self.computed_neighbor_gaps = {}
         self._team_logos = None  # driver code -> texture, filled on first draw
@@ -257,7 +273,7 @@ class LeaderboardComponent(BaseComponent):
             path = team_logo_path(row.get("TeamName"))
             if path:
                 if path not in textures:
-                    textures[path] = arcade.load_texture(path)
+                    textures[path] = load_ui_texture(path)
                 self._team_logos[row.get("Abbreviation")] = textures[path]
 
     @property
@@ -1138,6 +1154,7 @@ class ConstructorsChampionshipOverlay:
 
                 if team not in self.team_colors:
                     try:
+                        import fastf1.plotting  # pulls in matplotlib; only needed here
                         color_hex = fastf1.plotting.get_team_color(team, self.session)
                         hex_color = color_hex.lstrip("#")
                         rgb = tuple(int(hex_color[i:i+2], 16) for i in (0,2,4))
@@ -1743,7 +1760,7 @@ class RaceControlsComponent(BaseComponent):
                 if filename.lower().endswith(('.png', '.jpg', '.jpeg')):
                     texture_name = os.path.splitext(filename)[0]
                     texture_path = os.path.join(_controls_folder, filename)
-                    self._control_textures[texture_name] = arcade.load_texture(texture_path)
+                    self._control_textures[texture_name] = load_ui_texture(texture_path)
 
     @property
     def visible(self) -> bool:
@@ -1989,7 +2006,7 @@ class QualifyingLapTimeComponent(BaseComponent):
                 if filename.lower().endswith(('.png', '.jpg', '.jpeg')):
                     texture_name = os.path.splitext(filename)[0]
                     texture_path = os.path.join(tyres_folder, filename)
-                    self._tyre_textures[texture_name] = arcade.load_texture(texture_path)
+                    self._tyre_textures[texture_name] = load_ui_texture(texture_path)
 
     def on_update(self, delta_time: float):
         """
@@ -2185,8 +2202,12 @@ def extract_race_events(frames: List[dict], track_statuses: List[dict], total_la
     
     # Sample frames at regular intervals for performance (every 25 frames = 1 second)
     sample_rate = 25
-    
-    for i in range(0, n_frames, sample_rate):
+
+    # A FrameStore has the same drivers in every frame, so nobody can
+    # disappear; skip building thousands of frame dicts for nothing.
+    sampled = [] if hasattr(frames, "codes") else range(0, n_frames, sample_rate)
+
+    for i in sampled:
         frame = frames[i]
         drivers_data = frame.get("drivers", {})
         current_drivers = set(drivers_data.keys())
