@@ -626,35 +626,55 @@ class LapTimeLeaderboardComponent(BaseComponent):
             return
         self.selected = getattr(window, "selected_drivers", [])
         leaderboard_y = window.height - 40
-        cached_text(self.title, self.x, leaderboard_y, arcade.color.WHITE, 20, bold=True, anchor_x="left", anchor_y="top").draw()
+        rows_top = leaderboard_y - 30
+        panel_top = window.height - 20
+        panel_bottom = rows_top - len(self.entries) * self.row_height - 10
+        hud.draw_panel(self.x - 10, panel_bottom, self.width + 20, panel_top - panel_bottom)
+        hud.draw_section_title(str(self.title).upper(), self.x + 4, panel_top - 14)
+        left_x = self.x
+        right_x = self.x + self.width
+
+        def colour(entry):
+            color = entry.get('color')
+            return tuple(color) if isinstance(color, (list, tuple)) else tuple(arcade.color.WHITE)
+
+        # Row backgrounds (team colour bars, selection, separators) as one cached shape list
+        order = tuple(entry.get('code', '') for entry in self.entries)
+        row_colors = tuple(colour(entry) for entry in self.entries)
+        selected = tuple(c for c in order if c in self.selected)
+
+        def build_rows():
+            for i, code in enumerate(order):
+                top_y = rows_top - i * self.row_height
+                if code in selected:
+                    points = hud._rounded_points(left_x - 4, top_y - self.row_height + 1, self.width + 8, self.row_height - 2, 6)
+                    yield arcade.shape_list.create_polygon(points, (*hud.F1_RED, 70))
+                    yield arcade.shape_list.create_line_loop(points, (*hud.F1_RED, 170), 1)
+                elif i > 0:
+                    yield arcade.shape_list.create_line(left_x + 4, top_y, right_x - 4, top_y, (255, 255, 255, 12), 1)
+                yield arcade.shape_list.create_rectangle_filled(left_x + 25, top_y - self.row_height / 2, 3, 14, row_colors[i])
+
+        hud.cached_shapes(("lt-rows", order, row_colors, selected, left_x, rows_top, self.width, self.row_height), build_rows).draw()
+
         self.rects = []
         for i, entry in enumerate(self.entries):
             pos = entry.get('pos', i + 1)
             code = entry.get('code', '')
-            color = entry.get('color', arcade.color.WHITE)
             time_str = entry.get('time', '')
-            current_pos = i + 1
-            top_y = leaderboard_y - 30 - ((current_pos - 1) * self.row_height)
+            top_y = rows_top - i * self.row_height
             bottom_y = top_y - self.row_height
-            left_x = self.x
-            right_x = self.x + self.width
+            cy = round(top_y - self.row_height / 2)
             # store clickable rect (code, left, bottom, right, top)
             self.rects.append((code, left_x, bottom_y, right_x, top_y))
 
-            # selection highlight
-            if code in self.selected:
-                rect = arcade.XYWH((left_x + right_x) / 2, (top_y + bottom_y) / 2, right_x - left_x, top_y - bottom_y)
-                arcade.draw_rect_filled(rect, arcade.color.LIGHT_GRAY)
-                text_color = arcade.color.BLACK
-            else:
-                # accept tuple rgb or fallback to white
-                text_color = tuple(color) if isinstance(color, (list, tuple)) else arcade.color.WHITE
-
-            # Draw position and driver name on left, time on right with more padding
+            # Position, driver name on the left, time on the right
             driver_name = entry.get('driver_name', code)
-            cached_text(f"{pos}. {driver_name}", left_x + 12, top_y, text_color, 16, anchor_x="left", anchor_y="top").draw()
+            cached_text(str(pos), left_x + 16, cy, hud.TEXT_DIM, 12, bold=True,
+                        anchor_x="right", anchor_y="center").draw()
+            cached_text(str(driver_name), left_x + 34, cy, hud.TEXT, 13, anchor_x="left", anchor_y="center").draw()
             if time_str:
-                cached_text(time_str, right_x - 12, top_y, text_color, 14, anchor_x="right", anchor_y="top").draw()
+                cached_text(str(time_str), right_x - 4, cy, hud.TEXT_DIM, 12, font_name=hud.DISPLAY_FONT,
+                            anchor_x="right", anchor_y="center").draw()
 
     def on_mouse_press(self, window, x: float, y: float, button: int, modifiers: int):
         for code, left, bottom, right, top in self.rects:
@@ -699,70 +719,43 @@ class QualifyingSegmentSelectorComponent(BaseComponent):
         top = center_y + self.height // 2
         bottom = center_y - self.height // 2
         
-        # Draw modal background
-        modal_rect = arcade.XYWH(center_x, center_y, self.width, self.height)
-        arcade.draw_rect_filled(modal_rect, (40, 40, 40, 230))
-        arcade.draw_rect_outline(modal_rect, arcade.color.WHITE, 2)
-        
-        # Draw title
-        title = f"Qualifying Sessions - {driver_result.get('code','')}"
-        cached_text(title, left + 20, top - 30, arcade.color.WHITE, 18, 
-               bold=True, anchor_x="left", anchor_y="center").draw()
-        
-        # Draw segments
+        # Glass modal
+        hud.draw_panel(left, bottom, self.width, self.height, radius=16, fill=(20, 22, 29, 245), accent=hud.F1_RED)
+
+        # Title
+        cached_text(f"QUALIFYING  ·  {driver_result.get('code','')}", left + 20, top - 30, hud.TEXT, 12,
+                    font_name=hud.DISPLAY_FONT, anchor_x="left", anchor_y="center").draw()
+
+        # Segments
         segment_height = 50
         start_y = top - 80
 
         segments = []
+        for n in (1, 2, 3):
+            if driver_result.get(f'Q{n}') is not None:
+                segments.append({'time': driver_result[f'Q{n}'], 'segment': n})
 
-        if driver_result.get('Q1') is not None:
-            segments.append({
-                'time': driver_result['Q1'],
-                'segment': 1
-            })
-        if driver_result.get('Q2') is not None:
-            segments.append({
-                'time': driver_result['Q2'],
-                'segment': 2
-            })
-        if driver_result.get('Q3') is not None:
-            segments.append({
-                'time': driver_result['Q3'],
-                'segment': 3
-            })
-        
         for i, data in enumerate(segments):
             segment = f"Q{data['segment']}"
             segment_top = start_y - (i * (segment_height + 10))
-            segment_bottom = segment_top - segment_height
-            
-            # Highlight if selected
-            segment_rect = arcade.XYWH(center_x, segment_top - segment_height//2, 
-                                     self.width - 40, segment_height)
-            
+
             if segment == self.selected_segment:
-                arcade.draw_rect_filled(segment_rect, arcade.color.LIGHT_GRAY)
-                text_color = arcade.color.BLACK
+                fill, border = (*hud.F1_RED, 200), (255, 120, 110, 140)
             else:
-                arcade.draw_rect_filled(segment_rect, (60, 60, 60))
-                text_color = arcade.color.WHITE
-                
-            arcade.draw_rect_outline(segment_rect, arcade.color.WHITE, 1)
-            
-            # Draw segment info
-            segment_text = f"{segment.upper()}"
+                fill, border = hud.CONTROL_FILL, hud.CONTROL_BORDER
+            hud.draw_panel(left + 20, segment_top - segment_height, self.width - 40, segment_height,
+                           radius=12, fill=fill, border=border)
+
             time_text = format_time(float(data.get('time', 'No Time')))
-            
-            cached_text(segment_text, left + 30, segment_top - 20, 
-                       text_color, 16, bold=True, anchor_x="left", anchor_y="center").draw()
-            cached_text(time_text, right - 30, segment_top - 20, 
-                       text_color, 14, anchor_x="right", anchor_y="center").draw()
-        
-        # Draw close button
-        close_btn_rect = arcade.XYWH(right - 30, top - 30, 20, 20)
-        arcade.draw_rect_filled(close_btn_rect, arcade.color.RED)
-        cached_text("×", right - 30, top - 30, arcade.color.WHITE, 16, 
-               bold=True, anchor_x="center", anchor_y="center").draw()
+            cached_text(segment, left + 36, segment_top - 25, hud.TEXT, 14,
+                        font_name=hud.DISPLAY_FONT, anchor_x="left", anchor_y="center").draw()
+            cached_text(time_text, right - 36, segment_top - 25, hud.TEXT, 14,
+                        bold=True, anchor_x="right", anchor_y="center").draw()
+
+        # Close button
+        arcade.draw_circle_filled(right - 30, top - 30, 11, (255, 255, 255, 30))
+        arcade.draw_line(right - 34, top - 34, right - 26, top - 26, hud.TEXT, 2)
+        arcade.draw_line(right - 34, top - 26, right - 26, top - 34, hud.TEXT, 2)
 
     def on_mouse_press(self, window, x: float, y: float, button: int, modifiers: int):        
         if not getattr(window, "selected_driver", None):
@@ -2035,7 +2028,7 @@ class QualifyingLapTimeComponent(BaseComponent):
         # Get driver info
         driver_full_name = None
         fastest_driver_full_name = None
-        driver_color = arcade.color.ANTI_FLASH_WHITE
+        driver_color = hud.TEXT
         driver_code = getattr(window, 'loaded_driver_code', None)
         if driver_code:
             telemetry = window.data.get("telemetry")
@@ -2046,7 +2039,7 @@ class QualifyingLapTimeComponent(BaseComponent):
                 # Get color from results
                 for result in window.data.get("results", []):
                     if result.get("code") == driver_code:
-                        driver_color = tuple(result.get("color", arcade.color.ANTI_FLASH_WHITE))
+                        driver_color = tuple(result.get("color", hud.TEXT))
                         break
 
         # Get current time from window
@@ -2057,11 +2050,9 @@ class QualifyingLapTimeComponent(BaseComponent):
         current_t = current_frame.get("t", 0.0)
         formatted_time = format_time(current_t)
         
-        rect = arcade.XYWH(self.x + 125, self.y - 65, 250, 120)
-        
-        arcade.draw_rect_filled(rect, (20, 20, 20, 255))
+        hud.draw_panel(self.x - 6, self.y - 138, 262, 138, accent=driver_color[:3])
 
-        cached_text(f"{driver_full_name}", self.x + 10, self.y - 30, driver_color, 16, bold=True).draw()
+        cached_text(f"{driver_full_name}", self.x + 10, self.y - 30, hud.TEXT, 15, bold=True).draw()
         
         #Display tyre compound texture
         rect = arcade.XYWH(self.x + 220, self.y - 22, 24, 24)
@@ -2076,13 +2067,13 @@ class QualifyingLapTimeComponent(BaseComponent):
                 alpha=255
             )
 
-        arcade.draw_line(self.x, self.y - 40, self.x + 250, self.y - 40, arcade.color.ANTI_FLASH_WHITE, 3)
+        arcade.draw_line(self.x + 4, self.y - 42, self.x + 246, self.y - 42, (255, 255, 255, 30), 1)
 
-        cached_text(f"{formatted_time}", self.x + 10, self.y - 70, arcade.color.ANTI_FLASH_WHITE, 18, anchor_x="left", bold=True).draw()
+        cached_text(f"{formatted_time}", self.x + 10, self.y - 72, hud.TEXT, 15, anchor_x="left", font_name=hud.DISPLAY_FONT).draw()
 
         if self.fastest_driver_sector_times and fastest_driver_full_name and fastest_driver_full_name != driver_full_name:
             fastest_last_name = fastest_driver_full_name.split(" ")[-1]
-            cached_text(f"{fastest_last_name}", self.x + 150, self.y - 85, arcade.color.LIGHT_GRAY, 13, anchor_x="left").draw()
+            cached_text(f"{fastest_last_name}", self.x + 246, self.y - 82, hud.TEXT_DIM, 12, anchor_x="right").draw()
 
         #show sector times over the labels
         sector_configs = [
@@ -2105,7 +2096,7 @@ class QualifyingLapTimeComponent(BaseComponent):
                 delta_sector_time = sector_time - fastest_sector_time if sector_time is not None and fastest_sector_time is not None else None
             
             formatted_fastest_sector_time = format_time(cumulative_fastest_time)
-            text_color = arcade.color.ANTI_FLASH_WHITE
+            text_color = hud.TEXT
             
             # Calculate elapsed time in current sector
             # Sector 1 uses absolute time, others use time relative to cumulative
@@ -2120,15 +2111,15 @@ class QualifyingLapTimeComponent(BaseComponent):
                 text, text_color = self.show_delta_sector_times(sector_idx, sector_time, delta_sector_time, text_color)
                 # Draw green bar below completed sector
                 bar_width = 40 if sector_idx == 0 else 45
-                arcade.draw_line(x_pos - 45, self.y - 125, x_pos + bar_width, self.y - 125, arcade.color.GREEN, 3)
+                arcade.draw_line(x_pos - 45, self.y - 125, x_pos + bar_width, self.y - 125, hud.GREEN, 3)
                 if sector_idx == 2 and fastest_sector_time is not None:
-                    cached_text(f"{formatted_fastest_sector_time}s", self.x + 150, self.y - 65, arcade.color.LIGHT_GRAY, 13, anchor_x="left").draw()
+                    cached_text(f"{formatted_fastest_sector_time}s", self.x + 246, self.y - 64, hud.TEXT_DIM, 13, bold=True, anchor_x="right").draw()
 
             # Sector in progress - show current elapsed time
             else:
                 text = f"{elapsed_in_sector:.1f}s"
                 if fastest_sector_time is not None:
-                    cached_text(f"{formatted_fastest_sector_time}s", self.x + 150, self.y - 65, arcade.color.LIGHT_GRAY, 13, anchor_x="left").draw()
+                    cached_text(f"{formatted_fastest_sector_time}s", self.x + 246, self.y - 64, hud.TEXT_DIM, 13, bold=True, anchor_x="right").draw()
             
             # Always draw the sector time text
             cached_text(text, x_pos, self.y - 105, text_color, 12, anchor_x="center", bold=True).draw()
@@ -2142,17 +2133,17 @@ class QualifyingLapTimeComponent(BaseComponent):
 
     def draw_sector_labels(self, sector_times, current_t):
         s1_time = sector_times.get("sector1") or 0
-        s1_color = arcade.color.GREEN if s1_time > 0 and current_t >= s1_time else arcade.color.LIGHT_GRAY
+        s1_color = hud.GREEN if s1_time > 0 and current_t >= s1_time else hud.TEXT_DIM
         cached_text("S1", self.x + 35, self.y - 120, s1_color, 9, bold=True).draw()
 
         s2_val = sector_times.get("sector2") or 0
         s2_time = s1_time + s2_val
-        s2_color = arcade.color.GREEN if s2_time > 0 and current_t >= s2_time else arcade.color.LIGHT_GRAY
+        s2_color = hud.GREEN if s2_time > 0 and current_t >= s2_time else hud.TEXT_DIM
         cached_text("S2", self.x + 115, self.y - 120, s2_color, 9, bold=True).draw()
         
         s3_val = sector_times.get("sector3") or 0
         s3_time = s2_time + s3_val
-        s3_color = arcade.color.GREEN if s3_time > 0 and current_t >= s3_time else arcade.color.LIGHT_GRAY
+        s3_color = hud.GREEN if s3_time > 0 and current_t >= s3_time else hud.TEXT_DIM
         cached_text("S3", self.x + 200, self.y - 120, s3_color, 9, bold=True).draw()      
     
     def show_delta_sector_times(self, sector_idx: int, sector_time: float, delta_sector_time: float | None, text_color: tuple):
@@ -2160,10 +2151,10 @@ class QualifyingLapTimeComponent(BaseComponent):
             # Show delta for 1 second
             if delta_sector_time < 0:
                 text = f"-{abs(delta_sector_time):.3f}s"
-                text_color = arcade.color.GREEN
+                text_color = hud.GREEN
             else:
                 text = f"+{delta_sector_time:.3f}s"
-                text_color = arcade.color.YELLOW
+                text_color = hud.AMBER
         else:
             text = f"{sector_time:.1f}s"
             # Detect if sector just completed to trigger delta display (only once)

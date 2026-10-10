@@ -6,13 +6,15 @@ from src.ui_components import (
     build_track_from_example_lap,
     LapTimeLeaderboardComponent,
     RaceControlsComponent,
-    draw_finish_line,
+    create_finish_line_shapes,
+    cached_text,
     LegendComponent,
     ControlsPopupComponent,
     QualifyingLapTimeComponent,
 )
 from src.f1_data import get_driver_practice_telemetry
 from src.f1_data import FPS
+from src.lib import hud
 from src.lib.time import format_time
 
 SCREEN_WIDTH = 1280
@@ -209,7 +211,7 @@ class PracticeReplay(arcade.Window):
 
         self.selected_driver = None
 
-        arcade.set_background_color(arcade.color.BLACK)
+        arcade.set_background_color((11, 12, 16))
 
         self.update_scaling(self.width, self.height)
 
@@ -281,6 +283,7 @@ class PracticeReplay(arcade.Window):
 
     def on_draw(self):
         self.clear()
+        hud.draw_backdrop(self)
 
         # Draw simple line chart if telemetry is loaded
         # loaded_telemetry is now a dict: {driver_code: telemetry_data}
@@ -367,28 +370,26 @@ class PracticeReplay(arcade.Window):
                 gear_bg = arcade.XYWH(chart_left + chart_w * 0.5, gear_bottom + gear_h * 0.5, chart_w, gear_h)
                 ctrl_bg = arcade.XYWH(chart_left + chart_w * 0.5, ctrl_bottom + ctrl_h * 0.5, chart_w, ctrl_h)
 
-                arcade.draw_rect_filled(speed_bg, (40, 40, 40, 230))
-                arcade.draw_rect_filled(gear_bg, (40, 40, 40, 230))
-                arcade.draw_rect_filled(ctrl_bg, (40, 40, 40, 230))
+                for top_, h_ in ((speed_top, speed_h), (gear_top, gear_h), (ctrl_top, ctrl_h)):
+                    hud.draw_panel(chart_left, top_ - h_, chart_w, h_ + 26, radius=12)
 
                 # Add Subtitles to the charts
-                arcade.Text("Speed (km/h)", chart_left + 10, speed_top + 10, arcade.color.ANTI_FLASH_WHITE, 14).draw()
-                arcade.Text("Gear", chart_left + 10, gear_top + 10, arcade.color.ANTI_FLASH_WHITE, 14).draw()
-                arcade.Text("Throttle / Brake (%)", chart_left + 10, ctrl_top + 10, arcade.color.ANTI_FLASH_WHITE, 14).draw()
+                hud.draw_section_title("SPEED (KM/H)", chart_left + 14, speed_top + 19)
+                hud.draw_section_title("GEAR", chart_left + 14, gear_top + 19)
+                hud.draw_section_title("THROTTLE / BRAKE (%)", chart_left + 14, ctrl_top + 19)
 
                 # DRS key at right of the speed subtitle
                 key_size = 12
                 key_padding_right = 100
-                key_y = speed_top + 10 + (key_size * 0.5)
+                key_y = speed_top + 12
                 square_x = chart_right - key_padding_right - (key_size / 2)
 
-                drs_key_rect = arcade.XYWH(square_x, key_y, key_size, key_size)
-                arcade.draw_rect_filled(drs_key_rect, arcade.color.GREEN)
-                arcade.Text(
+                arcade.draw_circle_filled(square_x, key_y, 4, hud.GREEN)
+                cached_text(
                     "DRS active",
                     square_x + (key_size * 0.5) + 6,
                     key_y,
-                    arcade.color.ANTI_FLASH_WHITE,
+                    hud.TEXT,
                     12,
                     anchor_y="center"
                 ).draw()
@@ -415,7 +416,7 @@ class PracticeReplay(arcade.Window):
                     # Error message if too many drivers
                     if num_comparison > max_keys:
                         error_text = f"Too many comparison drivers ({num_comparison}). Maximum: {max_keys}"
-                        arcade.Text(
+                        cached_text(
                             error_text,
                             self.width // 2,
                             row_y,
@@ -439,11 +440,11 @@ class PracticeReplay(arcade.Window):
                         arcade.draw_rect_filled(comp_key_rect, comp_color)
 
                         # Draw text label
-                        arcade.Text(
+                        cached_text(
                             f"Comparison   {comp_driver_code}",
                             comp_square_x + comp_key_size + key_label_padding,
                             row_y,
-                            arcade.color.ANTI_FLASH_WHITE,
+                            hud.TEXT,
                             12,
                             anchor_y="center"
                         ).draw()
@@ -557,7 +558,7 @@ class PracticeReplay(arcade.Window):
                     x1pix = chart_left + nx1 * chart_w
                     x2pix = chart_left + nx2 * chart_w
                     drs_rect = arcade.XYWH((x1pix + x2pix) * 0.5, speed_bottom + speed_h * 0.5, x2pix - x1pix, speed_h)
-                    arcade.draw_rect_filled(drs_rect, (0, 100, 0, 100))
+                    arcade.draw_rect_filled(drs_rect, (*hud.GREEN, 40))
 
                 # Collect values frame-by-frame
                 for f_i, f in enumerate(frames[:self.frame_index + 1]):
@@ -609,7 +610,7 @@ class PracticeReplay(arcade.Window):
                             try:
                                 arcade.draw_line_strip(pts, comp_color, 2)
                                 current_speed = draw_comparison_speeds[-1] if draw_comparison_speeds else 0
-                                arcade.Text(f"{current_speed:.0f} km/h", pts[-1][0] + 10, pts[-1][1] - 15, comp_color, 12).draw()
+                                cached_text(f"{current_speed:.0f} km/h", pts[-1][0] + 10, pts[-1][1] - 15, comp_color, 12).draw()
                             except Exception as e:
                                 print(f"Chart draw error (comparison speed for {comp_data['code']}):", e)
 
@@ -623,9 +624,9 @@ class PracticeReplay(arcade.Window):
                         ypix = speed_bottom + VP + ny * (speed_h - 2 * VP)
                         pts.append((xpix, ypix))
                     try:
-                        arcade.draw_line_strip(pts, arcade.color.ANTI_FLASH_WHITE, 2)
+                        arcade.draw_line_strip(pts, hud.TEXT, 2)
                         current_speed = draw_speeds[-1] if draw_speeds else 0
-                        arcade.Text(f"{current_speed:.0f} km/h", pts[-1][0] + 10, pts[-1][1] + 5, arcade.color.ANTI_FLASH_WHITE, 12).draw()
+                        cached_text(f"{current_speed:.0f} km/h", pts[-1][0] + 10, pts[-1][1] + 5, hud.TEXT, 12).draw()
                     except Exception as e:
                         print("Chart draw error (speed):", e)
 
@@ -667,10 +668,10 @@ class PracticeReplay(arcade.Window):
                         arcade.draw_line_strip(comp_gear_pts, comp_color, 2)
 
                     if gear_pts:
-                        arcade.draw_line_strip(gear_pts, arcade.color.LIGHT_GRAY, 2)
+                        arcade.draw_line_strip(gear_pts, hud.TEXT_DIM, 2)
 
                         current_gear = draw_gears[-1] if draw_gears else 0
-                        arcade.Text(f"Gear: {int(current_gear)}", gear_pts[-1][0] + 10, gear_pts[-1][1] + 5, arcade.color.LIGHT_GRAY, 12).draw()
+                        cached_text(f"Gear: {int(current_gear)}", gear_pts[-1][0] + 10, gear_pts[-1][1] + 5, hud.TEXT_DIM, 12).draw()
 
                 except Exception as e:
                     print("Chart draw error (gear):", e)
@@ -696,9 +697,9 @@ class PracticeReplay(arcade.Window):
 
                 try:
                     if throttle_pts:
-                        arcade.draw_line_strip(throttle_pts, arcade.color.GREEN, 2)
+                        arcade.draw_line_strip(throttle_pts, hud.GREEN, 2)
                     if brake_pts:
-                        arcade.draw_line_strip(brake_pts, arcade.color.RED, 2)
+                        arcade.draw_line_strip(brake_pts, hud.F1_RED, 2)
                 except Exception as e:
                     print("Chart draw error (controls):", e)
 
@@ -714,7 +715,9 @@ class PracticeReplay(arcade.Window):
                 self.qualifying_lap_time_comp.draw(self)
 
                 y_offset = map_top - 48
-                arcade.Text(f"Playback Speed: {self.playback_speed:.1f}x", map_left + 10, y_offset - 130, arcade.color.ANTI_FLASH_WHITE, 14).draw()
+                hud.draw_pill(map_left + 60, y_offset - 124, 108, 24)
+                cached_text(f"SPEED {self.playback_speed:.1f}x", map_left + 60, y_offset - 124, hud.TEXT, 11, bold=True,
+                            anchor_x="center", anchor_y="center").draw()
 
                 # Draw circuit map in bottom half
                 if getattr(self, "x_min", None) is not None and getattr(self, "x_max", None) is not None:
@@ -751,16 +754,22 @@ class PracticeReplay(arcade.Window):
                     inner_world = getattr(self, "world_inner_points", None) or list(zip(self.x_inner, self.y_inner))
                     outer_world = getattr(self, "world_outer_points", None) or list(zip(self.x_outer, self.y_outer))
 
-                    self.inner_pts = [world_to_map(x, y) for x, y in inner_world if x is not None and y is not None]
-                    self.outer_pts = [world_to_map(x, y) for x, y in outer_world if x is not None and y is not None]
-                    try:
-                        if len(self.inner_pts) > 1:
-                            arcade.draw_line_strip(self.inner_pts, arcade.color.GRAY, 2)
-                        if len(self.outer_pts) > 1:
-                            arcade.draw_line_strip(self.outer_pts, arcade.color.GRAY, 2)
-                        draw_finish_line(self, 'Q')
-                    except Exception as e:
-                        print("Circuit draw error:", e)
+                    # Track band, edges and finish line only change with the map area, so they are
+                    # built once as a shape list
+                    def build_map():
+                        self.inner_pts = [world_to_map(x, y) for x, y in inner_world if x is not None and y is not None]
+                        self.outer_pts = [world_to_map(x, y) for x, y in outer_world if x is not None and y is not None]
+                        inner, outer = self.inner_pts, self.outer_pts
+                        n = min(len(inner), len(outer))
+                        if n > 1:
+                            strip = [pt for i in range(n) for pt in (inner[i], outer[i])] + [inner[0], outer[0]]
+                            yield arcade.shape_list.create_triangles_strip_filled_with_colors(strip, [(34, 36, 46)] * len(strip))
+                            yield arcade.shape_list.create_line_strip(list(inner) + [inner[0]], (120, 126, 140), 2)
+                            yield arcade.shape_list.create_line_strip(list(outer) + [outer[0]], (120, 126, 140), 2)
+                            yield from create_finish_line_shapes(inner[0], outer[0])
+
+                    hud.cached_shapes(("session-map", id(self), round(map_left), round(map_bottom), round(map_w), round(map_h)),
+                                      build_map).draw()
 
                     # Draw all comparison drivers' positions
                     if self.show_comparison_telemetry and comparison_telemetries:
@@ -778,7 +787,7 @@ class PracticeReplay(arcade.Window):
 
                     # Draw DRS zones on track map
                     if self.drs_zones_xy and self.toggle_drs_zones:
-                        drs_color = (0, 255, 0)
+                        drs_color = hud.GREEN
                         original_length = len(self.x_inner)
                         interpolated_length = len(inner_world)
 
@@ -816,23 +825,24 @@ class PracticeReplay(arcade.Window):
                             if r.get("code") == self.loaded_driver_code and r.get("color"):
                                 drv_color = tuple(r.get("color"))
                                 break
+                    arcade.draw_circle_filled(sx, sy, 8, (12, 13, 18))
                     arcade.draw_circle_filled(sx, sy, 6, drv_color)
 
                     # Overlay current gear near the position marker
                     cur_gear = tel.get("gear") or tel.get("nGear") or tel.get("Gear")
                     if cur_gear is None:
                         cur_gear = draw_gears[-1] if draw_gears else None
-                    arcade.Text(self.loaded_driver_code or "", sx + 10, sy + 4, arcade.color.WHITE, 12).draw()
+                    cached_text(self.loaded_driver_code or "", round(sx) + 12, round(sy) + 4, hud.TEXT, 11, font_name=hud.DISPLAY_FONT).draw()
                     if cur_gear is not None:
-                        arcade.Text(f"G:{int(cur_gear)}", sx + 10, sy - 10, arcade.color.LIGHT_GRAY, 12).draw()
+                        cached_text(f"G{int(cur_gear)}", round(sx) + 12, round(sy) - 12, hud.TEXT_DIM, 11, bold=True).draw()
 
         else:
             # Add "click a driver to view their practice lap" text
             info_text = "Click a driver on the left to load their practice lap telemetry."
-            arcade.Text(
+            cached_text(
                 info_text,
                 self.width / 2, self.height / 2,
-                arcade.color.LIGHT_GRAY, 18,
+                hud.TEXT_DIM, 18,
                 anchor_x="center", anchor_y="center"
             ).draw()
 
