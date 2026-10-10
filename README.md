@@ -163,6 +163,10 @@ The application will load a pre-computed telemetry dataset if you have run it be
 python main.py --viewer --year 2025 --round 12 --refresh-data
 ```
 
+Once a race has been computed, later runs load the session without the raw car telemetry and read the track layout from `computed_data/`, so they start much faster. Caches from older versions are converted to the compact format automatically on first load.
+
+OpenGL error checking is off by default for smoother playback; pass `--debug-gl` to turn it back on when debugging rendering issues.
+
 ### Qualifying Session Replay
 
 To run a Qualifying session replay, use the `--qualifying` flag:

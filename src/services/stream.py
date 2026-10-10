@@ -19,6 +19,9 @@ class TelemetryStreamServer:
     self.clients_lock = threading.Lock()
     self.server_socket = None
     self.running = False
+    # Incremented whenever a client connects, so the publisher can send
+    # one-off data (lap times, track geometry) to newcomers right away.
+    self.clients_version = 0
 
   def start(self):
     self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -34,6 +37,7 @@ class TelemetryStreamServer:
         print(f"Client connected from {addr}")
         with self.clients_lock:
           self.clients.append(client_socket)
+          self.clients_version += 1
         threading.Thread(target=self.handle_client, args=(client_socket,), daemon=True).start()
       except Exception as e:
         if self.running:
@@ -54,12 +58,29 @@ class TelemetryStreamServer:
         except ValueError:
           pass  # Already removed by broadcast() or stop()
 
-  def broadcast(self, data):
-    message = json.dumps(data).encode('utf-8')
-    dead_clients = []
-    
+  @property
+  def has_clients(self):
+    with self.clients_lock:
+      return bool(self.clients)
+
+  def broadcast(self, data, encoded_extras=None):
+    # encoded_extras: {key: already-JSON-encoded string} appended to the
+    # object as-is, so large payloads that never change are encoded once.
     with self.clients_lock:
       clients_copy = list(self.clients)
+    if not clients_copy:
+      return
+
+    message = json.dumps(data)
+    if encoded_extras:
+      parts = [message[:-1]]
+      for key, value in encoded_extras.items():
+        parts.append(", " if data else "")
+        parts.append(json.dumps(key) + ": " + value)
+      parts.append("}")
+      message = "".join(parts)
+    message = message.encode('utf-8')
+    dead_clients = []
     
     for client in clients_copy:
       try:

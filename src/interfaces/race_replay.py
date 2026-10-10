@@ -1,3 +1,4 @@
+import json
 import os
 import time
 import arcade
@@ -22,6 +23,7 @@ from src.ui_components import (
 )
 from src.tyre_degradation_integration import TyreDegradationIntegrator
 from src.services.stream import TelemetryStreamServer
+from src.lib.frames import FrameStore, frames_have_weather, fallback_lap_times
 
 
 SCREEN_WIDTH = 1280
@@ -69,7 +71,7 @@ class F1RaceReplayWindow(arcade.Window):
         self.frame_index = 0.0  # use float for fractional-frame accumulation
         self.paused = False
         self.total_laps = total_laps
-        self.has_weather = any("weather" in frame for frame in frames) if frames else False
+        self.has_weather = frames_have_weather(frames)
 
         # Pre-compute per-driver lap times from the full frame data.
         # This avoids playback-speed-dependent sampling errors when insight
@@ -265,6 +267,9 @@ class F1RaceReplayWindow(arcade.Window):
         """Broadcast current telemetry state to connected clients."""
         if not hasattr(self, 'telemetry_stream') or not self.telemetry_stream:
             return
+        # Nothing to do until a viewer/insight window is connected.
+        if not self.telemetry_stream.has_clients:
+            return
             
         current_frame = self.frames[min(int(self.frame_index), len(self.frames) - 1)] if self.frames else None
         
@@ -281,17 +286,9 @@ class F1RaceReplayWindow(arcade.Window):
         leader_code = ""
         leader_lap = 1
         if current_frame and "drivers" in current_frame:
-            driver_progress = {}
+            driver_progress = self._frame_progress(min(int(self.frame_index), len(self.frames) - 1), current_frame)
             for code, pos in current_frame["drivers"].items():
-                x, y = pos.get("x", 0.0), pos.get("y", 0.0)
-                lap_raw = pos.get("lap", 1)
-                try:
-                    lap = int(lap_raw)
-                except (ValueError, TypeError):
-                    lap = 1
-                projected_m = self._project_to_reference(x, y)
-                progress_m = float((max(lap, 1) - 1) * self._ref_total_length + projected_m)
-                driver_progress[code] = progress_m
+                progress_m = driver_progress[code]
                 if self._ref_total_length > 0:
                     pos["fraction"] = progress_m / self._ref_total_length
                 else:
@@ -345,25 +342,42 @@ class F1RaceReplayWindow(arcade.Window):
             }
         }
 
-        # Send every ~2s so reconnecting clients receive geometry without special handling
-        if hasattr(self, 'plot_x_ref') and int(self.frame_index) % 120 == 0:
-            payload["track_geometry"] = {
-                "x": self.plot_x_ref.tolist(),
-                "y": self.plot_y_ref.tolist(),
-                "x_inner": self.x_inner.tolist(),
-                "y_inner": self.y_inner.tolist(),
-                "x_outer": self.x_outer.tolist(),
-                "y_outer": self.y_outer.tolist(),
-                "rotation_deg": self.circuit_rotation,
+        # These parts never change during the replay, so they are JSON-encoded
+        # once and spliced into every message.
+        static = getattr(self, "_static_stream_json", None)
+        if static is None:
+            static = self._static_stream_json = {
+                "lap_times": json.dumps(self._precomputed_lap_times),
+                "status_laps": json.dumps(self._precomputed_status_laps),
             }
+            if hasattr(self, 'plot_x_ref'):
+                static["track_geometry"] = json.dumps({
+                    "x": self.plot_x_ref.tolist(),
+                    "y": self.plot_y_ref.tolist(),
+                    "x_inner": self.x_inner.tolist(),
+                    "y_inner": self.y_inner.tolist(),
+                    "x_outer": self.x_outer.tolist(),
+                    "y_outer": self.y_outer.tolist(),
+                    "rotation_deg": self.circuit_rotation,
+                })
 
-        # Send pre-computed data continuously. It's just a Python dictionary reference 
-        # (O(1) memory overhead in local publish/subscribe) and ensures windows 
-        # opened after the race has finished still receive the data.
-        payload["lap_times"] = self._precomputed_lap_times
-        payload["status_laps"] = self._precomputed_status_laps
+        extras = {}
+        # Send every ~2s so reconnecting clients receive geometry without special handling
+        if "track_geometry" in static and int(self.frame_index) % 120 == 0:
+            extras["track_geometry"] = static["track_geometry"]
 
-        self.telemetry_stream.broadcast(payload)
+        # Lap times are large and never change, so send them about once a
+        # second (and immediately to a newly connected window) instead of on
+        # every update. Windows opened after the race has finished still
+        # receive them.
+        self._broadcast_count = getattr(self, "_broadcast_count", 0) + 1
+        clients_version = self.telemetry_stream.clients_version
+        if self._broadcast_count % 25 == 1 or clients_version != getattr(self, "_sent_clients_version", None):
+            self._sent_clients_version = clients_version
+            extras["lap_times"] = static["lap_times"]
+            extras["status_laps"] = static["status_laps"]
+
+        self.telemetry_stream.broadcast(payload, encoded_extras=extras)
 
     @staticmethod
     def _compute_lap_times(frames, session=None):
@@ -996,6 +1010,8 @@ class F1RaceReplayWindow(arcade.Window):
 
     @staticmethod
     def _compute_fallback_lap_times_raw(frames, min_lap_time_s=30.0, max_lap_time_s=7200.0):
+        if isinstance(frames, FrameStore):
+            return fallback_lap_times(frames, min_lap_time_s, max_lap_time_s)
         lap_start_t = {}    # code -> session time when current lap began
         current_lap = {}    # code -> last seen lap number
         result = {}         # code -> list of lap time entries
@@ -1181,6 +1197,55 @@ class F1RaceReplayWindow(arcade.Window):
         ys_i = np.interp(t_new, t_old, ys)
         return list(zip(xs_i, ys_i))
 
+    def _frame_progress(self, idx, frame):
+        """Along-track progress (metres since race start) for every driver.
+
+        All cars are projected in one vectorised KD-tree query and the result
+        is reused by on_draw and the telemetry broadcast for the same frame.
+        """
+        cached = getattr(self, "_progress_cache", None)
+        if cached is not None and cached[0] == idx and cached[1] is frame:
+            return cached[2]
+
+        codes = list(frame["drivers"].keys())
+        progress = {}
+        if codes:
+            drivers = frame["drivers"]
+            xs = np.array([drivers[c].get("x", 0.0) for c in codes], dtype=float)
+            ys = np.array([drivers[c].get("y", 0.0) for c in codes], dtype=float)
+            laps = []
+            for c in codes:
+                try:
+                    laps.append(int(drivers[c].get("lap", 1)))
+                except (ValueError, TypeError):
+                    laps.append(1)
+            projected = self._project_many_to_reference(xs, ys)
+            for c, lap, proj in zip(codes, laps, projected.tolist()):
+                progress[c] = float((max(lap, 1) - 1) * self._ref_total_length + proj)
+        self._progress_cache = (idx, frame, progress)
+        return progress
+
+    def _project_many_to_reference(self, xs, ys):
+        """Vectorised _project_to_reference for arrays of points."""
+        if self._ref_total_length == 0.0:
+            return np.zeros(len(xs))
+        _, idx = self.track_tree.query(np.column_stack((xs, ys)))
+        idx = np.asarray(idx, dtype=np.int64)
+        result = self._ref_cumdist[idx].astype(float)
+
+        has_next = idx < len(self._ref_xs) - 1
+        i1 = np.where(has_next, idx, 0)
+        i2 = np.where(has_next, idx + 1, 0)
+        x1, y1 = self._ref_xs[i1], self._ref_ys[i1]
+        vx, vy = self._ref_xs[i2] - x1, self._ref_ys[i2] - y1
+        seg_len2 = vx * vx + vy * vy
+        ok = has_next & (seg_len2 > 0)
+        safe_len2 = np.where(ok, seg_len2, 1.0)
+        t = np.clip(((xs - x1) * vx + (ys - y1) * vy) / safe_len2, 0.0, 1.0)
+        seg_dist = np.sqrt((t * vx) ** 2 + (t * vy) ** 2)
+        result[ok] = self._ref_cumdist[i1[ok]] + seg_dist[ok]
+        return result
+
     def _project_to_reference(self, x, y):
         if self._ref_total_length == 0.0:
             return 0.0
@@ -1266,6 +1331,38 @@ class F1RaceReplayWindow(arcade.Window):
         # Update the polyline screen coordinates based on new scale
         self.screen_inner_points = [self.world_to_screen(x, y) for x, y in self.world_inner_points]
         self.screen_outer_points = [self.world_to_screen(x, y) for x, y in self.world_outer_points]
+        self._track_shape_cache = {}
+        self._drs_shapes = None
+
+    def _get_track_shapes(self, track_color):
+        shapes = self._track_shape_cache.get(track_color)
+        if shapes is None:
+            shapes = arcade.shape_list.ShapeElementList()
+            if len(self.screen_inner_points) > 1:
+                shapes.append(arcade.shape_list.create_line_strip(self.screen_inner_points, track_color, 4))
+            if len(self.screen_outer_points) > 1:
+                shapes.append(arcade.shape_list.create_line_strip(self.screen_outer_points, track_color, 4))
+            self._track_shape_cache[track_color] = shapes
+        return shapes
+
+    def _get_drs_shapes(self):
+        if self._drs_shapes is None:
+            drs_color = (0, 255, 0)  # Bright green for DRS zones
+            shapes = arcade.shape_list.ShapeElementList()
+            outer_x = np.asarray(self.x_outer)
+            outer_y = np.asarray(self.y_outer)
+            for zone in self.drs_zones:
+                start_idx = zone["start"]["index"]
+                end_idx = zone["end"]["index"]
+                # Extract the outer track points for this DRS zone segment
+                drs_outer_points = [
+                    self.world_to_screen(outer_x[i], outer_y[i])
+                    for i in range(start_idx, min(end_idx + 1, len(outer_x)))
+                ]
+                if len(drs_outer_points) > 1:
+                    shapes.append(arcade.shape_list.create_line_strip(drs_outer_points, drs_color, 6))
+            self._drs_shapes = shapes
+        return self._drs_shapes
 
     def on_resize(self, width, height):
         """Called automatically by Arcade when window is resized."""
@@ -1324,6 +1421,7 @@ class F1RaceReplayWindow(arcade.Window):
 
         # 2. Draw Track (using pre-calculated screen points)
         idx = min(int(self.frame_index), self.n_frames - 1)
+        frame_idx = idx
         frame = self.frames[idx]
         current_time = frame["t"]
         current_track_status = "GREEN"
@@ -1351,30 +1449,13 @@ class F1RaceReplayWindow(arcade.Window):
         elif current_track_status == "6" or current_track_status == "7":
             track_color = STATUS_COLORS.get("VSC")
             
-        if len(self.screen_inner_points) > 1:
-            arcade.draw_line_strip(self.screen_inner_points, track_color, 4)
-        if len(self.screen_outer_points) > 1:
-            arcade.draw_line_strip(self.screen_outer_points, track_color, 4)
-        
+        # Track edges and DRS zones are static between resizes, so their
+        # geometry is uploaded to the GPU once and reused every frame.
+        self._get_track_shapes(track_color).draw()
+
         # 2.5 Draw DRS Zones (green segments on outer track edge)
         if hasattr(self, 'drs_zones') and self.drs_zones and self.toggle_drs_zones:
-            drs_color = (0, 255, 0)  # Bright green for DRS zones
-            
-            for _, zone in enumerate(self.drs_zones):
-                start_idx = zone["start"]["index"]
-                end_idx = zone["end"]["index"]
-                
-                # Extract the outer track points for this DRS zone segment
-                drs_outer_points = []
-                for i in range(start_idx, min(end_idx + 1, len(self.x_outer))):
-                    x = self.x_outer.iloc[i]
-                    y = self.y_outer.iloc[i]
-                    sx, sy = self.world_to_screen(x, y)
-                    drs_outer_points.append((sx, sy))
-                
-                # Draw the DRS zone segment
-                if len(drs_outer_points) > 1:
-                    arcade.draw_line_strip(drs_outer_points, drs_color, 6)
+            self._get_drs_shapes().draw()
 
         draw_finish_line(self)
         # 3. Draw Cars
@@ -1491,22 +1572,8 @@ class F1RaceReplayWindow(arcade.Window):
         
         # Determine Leader info using projected along-track distance (more robust than dist)
         # Use the progress metric in metres for each driver and use that to order the leaderboard.
-        driver_progress = {}
-        for code, pos in frame["drivers"].items():
-            # parse lap defensively
-            lap_raw = pos.get("lap", 1)
-            try:
-                lap = int(lap_raw)
-            except Exception:
-                lap = 1
-
-            # Project (x,y) to reference and combine with lap count
-            projected_m = self._project_to_reference(pos.get("x", 0.0), pos.get("y", 0.0))
-
-            # progress in metres since race start: (lap-1) * lap_length + projected_m
-            progress_m = float((max(lap, 1) - 1) * self._ref_total_length + projected_m)
-
-            driver_progress[code] = progress_m
+        # progress in metres since race start: (lap-1) * lap_length + projected_m
+        driver_progress = self._frame_progress(frame_idx, frame)
 
         # Leader is the one with greatest progress_m
         if driver_progress:
