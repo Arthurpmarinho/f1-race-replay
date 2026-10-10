@@ -16,6 +16,7 @@ class SettingsManager:
     DEFAULTS = {
         "cache_location": ".fastf1-cache",
         "computed_data_location": "computed_data",
+        "animations": True,
     }
 
     _instance: Optional["SettingsManager"] = None
@@ -126,3 +127,10 @@ class SettingsManager:
 def get_settings() -> SettingsManager:
     """Get the global settings manager instance."""
     return SettingsManager()
+
+
+def animations_enabled() -> bool:
+    """Whether window transitions should play (off with F1_REPLAY_NO_ANIMATIONS=1)."""
+    if os.environ.get("F1_REPLAY_NO_ANIMATIONS"):
+        return False
+    return bool(get_settings().get("animations", True))

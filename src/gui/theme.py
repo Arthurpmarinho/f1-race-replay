@@ -147,6 +147,16 @@ QProgressBar {{
 }}
 QProgressBar::chunk {{ background: {F1_RED}; border-radius: 3px; }}
 
+QCheckBox {{ spacing: 10px; background: transparent; }}
+QCheckBox::indicator {{
+    width: 16px; height: 16px;
+    border-radius: 5px;
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    background: rgba(255, 255, 255, 0.07);
+}}
+QCheckBox::indicator:hover {{ border-color: rgba(225, 6, 0, 0.7); }}
+QCheckBox::indicator:checked {{ background: {F1_RED}; border-color: rgba(255, 255, 255, 0.35); }}
+
 QToolTip {{
     background: #1B1D24;
     border: 1px solid rgba(255, 255, 255, 0.12);

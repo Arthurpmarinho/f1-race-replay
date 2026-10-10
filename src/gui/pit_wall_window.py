@@ -1,9 +1,10 @@
 from PySide6.QtWidgets import QMainWindow, QStatusBar, QLabel
 from PySide6.QtCore import Qt
+from src.gui.motion import AnimatedWindow
 from src.services.stream import TelemetryStreamClient
 
 
-class PitWallWindow(QMainWindow):
+class PitWallWindow(AnimatedWindow, QMainWindow):
     def __init__(self):
         super().__init__()
         
@@ -70,6 +71,8 @@ class PitWallWindow(QMainWindow):
     
     def closeEvent(self, event):
         """Handle window close event - cleanup telemetry client."""
+        if self.defer_close_for_fade(event):
+            return
         try:
             if self.client.isRunning():
                 self.client.stop()

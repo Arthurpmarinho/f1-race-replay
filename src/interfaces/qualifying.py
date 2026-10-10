@@ -1,4 +1,5 @@
 import arcade
+from src.lib.transitions import attach_transitions, exit_with_fade
 import threading
 import time
 import numpy as np
@@ -30,6 +31,7 @@ BOTTOM_MARGIN = 40
 class QualifyingReplay(arcade.Window):
     def __init__(self, session, data, circuit_rotation=0, left_ui_margin=340, right_ui_margin=0, title="Qualifying Results"):
         super().__init__(width=SCREEN_WIDTH, height=SCREEN_HEIGHT, title=title, resizable=True)
+        attach_transitions(self)
         self.maximize()
         
         self.session = session
@@ -781,7 +783,7 @@ class QualifyingReplay(arcade.Window):
     def on_key_press(self, symbol: int, modifiers: int):
         # Allow ESC to close window at any time
         if symbol == arcade.key.ESCAPE:
-            arcade.close_window()
+            exit_with_fade(self)
             return
         # Allow restart (R), comparison toggle (C), and DRS toggle (D) even when lap is complete
         if symbol == arcade.key.R:

@@ -3,11 +3,13 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QFrame, QScrollArea
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QFont
 
+from src.gui.motion import AnimatedWindow, cascade
 
-class InsightsMenu(QMainWindow):
+
+class InsightsMenu(AnimatedWindow, QMainWindow):
     
     def __init__(self):
         super().__init__()
@@ -16,6 +18,7 @@ class InsightsMenu(QMainWindow):
         
         # Keep references to opened windows
         self.opened_windows = []
+        self.sections = []
         
         self.setup_ui()
     
@@ -83,6 +86,7 @@ class InsightsMenu(QMainWindow):
             ]
         ))
         
+        self.sections = [content_layout.itemAt(i).widget() for i in range(content_layout.count())]
         content_layout.addStretch()
         
         scroll.setWidget(content_widget)
@@ -92,6 +96,15 @@ class InsightsMenu(QMainWindow):
         footer = self.create_footer()
         main_layout.addWidget(footer)
     
+    def _motion_content(self):
+        return None
+
+    def showEvent(self, event):
+        first = not getattr(self, "_shown_once", False)
+        super().showEvent(event)
+        if first:
+            QTimer.singleShot(0, lambda: cascade(self.sections, dy=16))
+
     def create_header(self):
         header = QFrame()
         header.setFrameShape(QFrame.NoFrame)

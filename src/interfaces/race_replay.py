@@ -1,6 +1,7 @@
 import os
 import time
 import arcade
+from src.lib.transitions import attach_transitions, exit_with_fade
 import numpy as np
 from scipy.spatial import cKDTree
 from src.f1_data import FPS
@@ -36,6 +37,7 @@ class F1RaceReplayWindow(arcade.Window):
                  race_control_messages=None):
         # Set resizable to True so the user can adjust mid-sim
         super().__init__(SCREEN_WIDTH, SCREEN_HEIGHT, title, resizable=True)
+        attach_transitions(self)
         self.maximize()
 
         self.telemetry_stream = None
@@ -1633,7 +1635,7 @@ class F1RaceReplayWindow(arcade.Window):
     def on_key_press(self, symbol: int, modifiers: int):
         # Allow ESC to close window at any time
         if symbol == arcade.key.ESCAPE:
-            arcade.close_window()
+            exit_with_fade(self)
             return
         # Show Drivers Championship
         if symbol == arcade.key.C:
