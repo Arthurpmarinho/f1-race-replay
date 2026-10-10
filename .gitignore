@@ -22,3 +22,10 @@ still_frame.png
 .DS_Store
 .idea/
 .vscode/
+
+# Trademarked logos, kept locally
+images/logos/*
+!images/logos/README.md
+
+# Formula1 font files (proprietary), kept locally
+fonts/Formula1*

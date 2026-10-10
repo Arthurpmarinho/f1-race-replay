@@ -2,6 +2,8 @@ import arcade
 from typing import List, Literal, Tuple, Optional
 from typing import Sequence, Optional, Tuple
 from src.lib.time import format_time
+from src.lib.team_logos import team_logo_path
+from src.lib.fonts import display_font_family
 import numpy as np
 import pandas as pd
 import fastf1.plotting
@@ -270,6 +272,21 @@ class LeaderboardComponent(BaseComponent):
                     self._tyre_textures[texture_name] = arcade.load_texture(texture_path)
         self.computed_gaps = {}
         self.computed_neighbor_gaps = {}
+        self._team_logos = None  # driver code -> texture, filled on first draw
+        self._display_font = (display_font_family(), "calibri", "arial")
+
+    def _load_team_logos(self, window):
+        self._team_logos = {}
+        results = getattr(getattr(window, "session", None), "results", None)
+        if results is None:
+            return
+        textures = {}
+        for _, row in results.iterrows():
+            path = team_logo_path(row.get("TeamName"))
+            if path:
+                if path not in textures:
+                    textures[path] = arcade.load_texture(path)
+                self._team_logos[row.get("Abbreviation")] = textures[path]
 
     @property
     def visible(self) -> bool:
@@ -335,7 +352,7 @@ class LeaderboardComponent(BaseComponent):
             return
         self.selected = getattr(window, "selected_drivers", [])
         leaderboard_y = window.height - 40
-        arcade.Text("Leaderboard", self.x, leaderboard_y, arcade.color.WHITE, 20, bold=True, anchor_x="left", anchor_y="top").draw()
+        arcade.Text("Leaderboard", self.x, leaderboard_y, arcade.color.WHITE, 15, font_name=self._display_font, anchor_x="left", anchor_y="top").draw()
         # sync with window state if present
         self.show_gaps = getattr(window, "leaderboard_show_gaps", self.show_gaps)
         self.show_neighbor_gaps = getattr(window, "leaderboard_show_neighbor_gaps", self.show_neighbor_gaps)
@@ -368,6 +385,8 @@ class LeaderboardComponent(BaseComponent):
         arcade.Text("L", toggle_x, toggle_y, arcade.color.WHITE, 12, anchor_x="center", anchor_y="center", bold=True).draw()
 
         self.rects = []
+        if self._team_logos is None:
+            self._load_team_logos(window)
 
         # Sort entries by lap number an distance progressed
         # If any of the entries have lap > 1, then sort
@@ -411,13 +430,20 @@ class LeaderboardComponent(BaseComponent):
                 driver_text = text
                 pit_text = ""
 
-            arcade.Text(driver_text,left_x,top_y,text_color,16,anchor_x="left",anchor_y="top").draw()
-            
+            # Team logo in front of the name, scaled to fit a 26x16 box
+            logo = self._team_logos.get(code)
+            if logo:
+                scale = min(26 / logo.width, 16 / logo.height)
+                arcade.draw_texture_rect(logo, arcade.XYWH(left_x + 13, top_y - 12, logo.width * scale, logo.height * scale))
+            name_x = left_x + 32 if self._team_logos else left_x
+
+            arcade.Text(driver_text,name_x,top_y - 1,text_color,13,font_name=self._display_font,anchor_x="left",anchor_y="top").draw()
+
             #PIT indicator in white
-            if pit_text:arcade.Text(pit_text, left_x + 80, top_y,arcade.color.WHITE,16,anchor_x="left",anchor_y="top").draw()
+            if pit_text:arcade.Text(pit_text, name_x + 84, top_y,arcade.color.WHITE,16,anchor_x="left",anchor_y="top").draw()
 
             #OUT indicator in red
-            if out_text: arcade.Text(out_text, left_x + 80, top_y, (155,17,30), 16, anchor_x="left", anchor_y="top",bold=True).draw()
+            if out_text: arcade.Text(out_text, name_x + 84, top_y, (155,17,30), 16, anchor_x="left", anchor_y="top",bold=True).draw()
 
             # Gap display (if enabled)
             if getattr(self, "show_neighbor_gaps", False):

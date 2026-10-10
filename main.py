@@ -5,10 +5,14 @@ from src.interfaces.practice import run_practice_replay
 import sys
 from src.cli.race_selection import cli_load
 from src.gui.race_selection import RaceSelectionWindow
+from src.gui.theme import apply_theme
 from PySide6.QtWidgets import QApplication
 from src.lib.season import get_season
+from src.lib.fonts import use_app_font_in_arcade
 import logging
 import re
+
+use_app_font_in_arcade()
 
 
 def _extract_circuit_name(event_name: str) -> str:
@@ -247,6 +251,7 @@ if __name__ == "__main__":
   # Run the GUI
 
   app = QApplication(sys.argv)
+  apply_theme(app)
   win = RaceSelectionWindow()
   win.show()
   sys.exit(app.exec())
