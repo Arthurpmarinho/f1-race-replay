@@ -4,6 +4,7 @@ from typing import Sequence, Optional, Tuple
 from src.lib.time import format_time
 from src.lib.team_logos import team_logo_path
 from src.lib.fonts import display_font_family
+from src.lib import hud
 import numpy as np
 import pandas as pd
 import fastf1.plotting
@@ -94,15 +95,13 @@ class LegendComponent(BaseComponent):
         self._visible = True
 
 
-    def on_mouse_press(self, window, x: float, y: float, button: int, modifiers: int):
+    def _help_pill_rect(self):
+        """(left, bottom, right, top) of the help pill in the bottom-left corner."""
+        cy = self.y - getattr(self, "controls_text_offset", 0)
+        return (self.x, cy - 15, self.x + 116, cy + 15)
 
-        line_x = self.x
-        line_y = self.y - getattr(self, "controls_text_offset", 0)
-        left = line_x
-        text_width = self._text.content_width or 120
-        right = line_x + text_width + 8
-        top = line_y + 8
-        bottom = line_y - 18
+    def on_mouse_press(self, window, x: float, y: float, button: int, modifiers: int):
+        left, bottom, right, top = self._help_pill_rect()
 
         if left <= x <= right and bottom <= y <= top:
             popup = getattr(window, "controls_popup_comp", None)
@@ -120,57 +119,23 @@ class LegendComponent(BaseComponent):
                     popup.show_over(left_pos, top_pos)
             return True
         return False
-    
+
     def draw(self, window):
         # Skip rendering entirely if hidden
-        
         if not self._visible:
             return
-        for i, lines in enumerate(self.lines):
-            line = lines[0] if isinstance(lines, tuple) else lines # main text
-            brackets = lines[1] if isinstance(lines, tuple) and len(lines) > 2 else None # brackets only if icons exist
-            icon_keys = lines[2] if isinstance(lines, tuple) and len(lines) > 2 else None # icon keys
-        
-            icon_size = 14
-            # Draw icons if any
-            
-            if icon_keys:
-                control_icon_x = self.x + 12
-                for key in icon_keys:
-                    icon_texture = self._control_icons_textures.get(key)
-                    if icon_texture:
-                        control_icon_y = self.y - (i * 25) + 5 # slight vertical offset
-                        rect = arcade.XYWH(control_icon_x, control_icon_y, icon_size, icon_size)
-                        arcade.draw_texture_rect(
-                            rect = rect,
-                            texture = icon_texture,
-                            angle = 0,
-                            alpha = 255
-                        )
-                        control_icon_x += icon_size + 6 # spacing between icons
-                        
-            if brackets:
-                for j in range(len(brackets)):
-                    self._text.font_size = 14
-                    self._text.bold = (i == 0)
-                    self._text.color = arcade.color.LIGHT_GRAY
-                    self._text.text = brackets[j]
-                    self._text.x = self.x + (j * (icon_size + 5))
-                    self._text.y = self.y - (i * 25)
-                    self._text.draw()
-            
-            # Draw the text line
-            self._text.text = line
-            self._text.x = self.x + (60 if icon_keys else 0)
-            base_y = self.y - (i * 25)
-            
-            if i == 0:
-                base_y -= getattr(self, "controls_text_offset", 0)
-            self._text.y = base_y
-            self._text.draw()
+        left, bottom, right, top = self._help_pill_rect()
+        cy = (bottom + top) / 2
+        hud.draw_panel(left, bottom, right - left, top - bottom, radius=(top - bottom) / 2,
+                       fill=hud.CONTROL_FILL, border=hud.CONTROL_BORDER)
+        # "H" keycap followed by the label
+        hud.draw_panel(left + 6, cy - 10, 22, 20, radius=6, fill=(255, 255, 255, 34), border=None)
+        cached_text("H", left + 17, cy, hud.TEXT, 10, font_name=hud.DISPLAY_FONT,
+                    anchor_x="center", anchor_y="center").draw()
+        cached_text("Controls", left + 38, cy, hud.TEXT_DIM, 12, anchor_x="left", anchor_y="center").draw()
 
 class WeatherComponent(BaseComponent):
-    def __init__(self, left=20, width=280, height=130, top_offset=170, visible=True):
+    def __init__(self, left=20, width=300, height=130, top_offset=170, visible=True):
         self.left = left
         self.width = width
         self.height = height
@@ -215,12 +180,10 @@ class WeatherComponent(BaseComponent):
 
     def draw(self, window):
         # Skip rendering entirely if hidden
-        if not self._visible:
+        if not self._visible or (not self.info and not getattr(window, "has_weather", False)):
+            window.weather_bottom = None
             return
         panel_top = window.height - self.top_offset
-        if not self.info and not getattr(window, "has_weather", False):
-            return
-        cached_text("Weather", self.left + 12, panel_top - 10, arcade.color.WHITE, 18, bold=True, anchor_y="top").draw()
         def _fmt(val, suffix="", precision=1):
             return f"{val:.{precision}f}{suffix}" if val is not None else "N/A"
         info = self.info or {}
@@ -229,40 +192,31 @@ class WeatherComponent(BaseComponent):
             ("Track", f"{_fmt(info.get('track_temp'), '°C')}", "thermometer"),
             ("Air", f"{_fmt(info.get('air_temp'), '°C')}", "thermometer"),
             ("Humidity", f"{_fmt(info.get('humidity'), '%', precision=0)}", "drop"),
-            ("Wind", f"{_fmt(info.get('wind_speed'), ' km/h')} {_format_wind_direction(info.get('wind_direction'))}", "wind"),
+            ("Wind", f"{_fmt(info.get('wind_speed'), ' km/h', precision=0)} {_format_wind_direction(info.get('wind_direction'))}", "wind"),
             ("Rain", f"{info.get('rain_state','N/A')}", "rain"),
         ]
-        
-        start_y = panel_top - 36
-        last_y = start_y
 
-        cached_text("Weather", self.left + 12, panel_top - 10, arcade.color.WHITE, 18, bold=True, anchor_y="top").draw()
+        # Two-column grid inside a glass card
+        row_h = 34
+        rows = (len(weather_lines) + 1) // 2
+        height = 34 + rows * row_h + 6
+        bottom = panel_top - height
+        hud.draw_panel(self.left, bottom, self.width, height)
+        hud.draw_section_title("WEATHER", self.left + 16, panel_top - 14)
 
+        col_w = (self.width - 32) / 2
         for idx, (label, value, icon_key) in enumerate(weather_lines):
-            line_y = start_y - idx * 22
-            last_y = line_y
-            # Draw weather icon
+            col, row = idx % 2, idx // 2
+            x = self.left + 16 + col * col_w
+            cy = round(panel_top - 34 - row * row_h - row_h / 2)
             weather_texture = self._weather_icon_textures.get(icon_key)
             if weather_texture:
-                weather_icon_x = self.left + 24
-                weather_icon_y = line_y - 15
-                icon_size = 16
-                rect = arcade.XYWH(weather_icon_x, weather_icon_y, icon_size, icon_size)
-                arcade.draw_texture_rect(
-                    rect=rect,
-                    texture=weather_texture,
-                    angle=0,
-                    alpha=255
-                )
-            
-            # Draw text
-
-            line_text = f"{label}: {value}"
-            
-            cached_text(line_text, self.left + 38, line_y, arcade.color.LIGHT_GRAY, 14, bold=False, anchor_y="top").draw()
+                arcade.draw_texture_rect(weather_texture, arcade.XYWH(x + 8, cy, 16, 16), alpha=200)
+            cached_text(label, x + 24, cy + 7, hud.TEXT_DIM, 10, anchor_y="center").draw()
+            cached_text(value, x + 24, cy - 8, hud.TEXT, 13, bold=True, anchor_y="center").draw()
 
         # Track the bottom of the weather panel so info boxes can stack below it
-        window.weather_bottom = last_y - 20
+        window.weather_bottom = bottom
 
 class LeaderboardComponent(BaseComponent):
     def __init__(self, x: int, right_margin: int = 260, width: int = 240, visible=True):
@@ -370,7 +324,6 @@ class LeaderboardComponent(BaseComponent):
             return
         self.selected = getattr(window, "selected_drivers", [])
         leaderboard_y = window.height - 40
-        cached_text("Leaderboard", self.x, leaderboard_y, arcade.color.WHITE, 15, font_name=self._display_font, anchor_x="left", anchor_y="top").draw()
         # sync with window state if present
         self.show_gaps = getattr(window, "leaderboard_show_gaps", self.show_gaps)
         self.show_neighbor_gaps = getattr(window, "leaderboard_show_neighbor_gaps", self.show_neighbor_gaps)
@@ -379,30 +332,6 @@ class LeaderboardComponent(BaseComponent):
         if self.show_gaps and self.show_neighbor_gaps:
             self.show_gaps = False
 
-        # small radio btns to the right of the title: interval gaps and leader gaps
-        toggle_radius = 10
-        toggle_y = leaderboard_y - 15
-        gap_between_toggles = 30
-        
-        # interval radio-btn (I)
-        neighbor_x = self.x + self.width - gap_between_toggles - toggle_radius
-        self.neighbor_toggle_rect = (neighbor_x - toggle_radius, toggle_y - toggle_radius, neighbor_x + toggle_radius, toggle_y + toggle_radius)
-        nb_bg = (100, 100, 100) if not self.show_neighbor_gaps else (50, 150, 50)
-        arcade.draw_circle_filled(neighbor_x, toggle_y, toggle_radius, nb_bg)
-        nb_border = (150, 150, 150) if not self.show_neighbor_gaps else (80, 200, 80)
-        arcade.draw_circle_outline(neighbor_x, toggle_y, toggle_radius, nb_border, 2)
-        cached_text("I", neighbor_x, toggle_y, arcade.color.WHITE, 12, anchor_x="center", anchor_y="center", bold=True).draw()
-
-        # leader radio-btn (L)
-        toggle_x = self.x + self.width - toggle_radius
-        self.gap_toggle_rect = (toggle_x - toggle_radius, toggle_y - toggle_radius, toggle_x + toggle_radius, toggle_y + toggle_radius)
-        lg_bg = (100, 100, 100) if not self.show_gaps else (50, 150, 50)
-        arcade.draw_circle_filled(toggle_x, toggle_y, toggle_radius, lg_bg)
-        lg_border = (150, 150, 150) if not self.show_gaps else (80, 200, 80)
-        arcade.draw_circle_outline(toggle_x, toggle_y, toggle_radius, lg_border, 2)
-        cached_text("L", toggle_x, toggle_y, arcade.color.WHITE, 12, anchor_x="center", anchor_y="center", bold=True).draw()
-
-        self.rects = []
         if self._team_logos is None:
             self._load_team_logos(window)
 
@@ -420,74 +349,99 @@ class LeaderboardComponent(BaseComponent):
         else:
             new_entries = self.entries
 
+        lap_one = bool(new_entries) and new_entries[0][2].get("lap", 0) == 1
+        rows_top = leaderboard_y - 30
+        panel_bottom = rows_top - len(new_entries) * self.row_height - (34 if lap_one else 10)
+        panel_top = window.height - 20
+        hud.draw_panel(self.x - 10, panel_bottom, self.width + 20, panel_top - panel_bottom)
+        hud.draw_section_title("LEADERBOARD", self.x + 4, panel_top - 14)
+
+        # Interval / leader gap toggles as small pills to the right of the title
+        toggle_y = panel_top - 20
+        toggle_w, toggle_h = 34, 18
+        for name, label, active, cx in (
+            ("neighbor", "INT", self.show_neighbor_gaps, self.x + self.width - toggle_w * 1.5 - 4),
+            ("gap", "LDR", self.show_gaps, self.x + self.width - toggle_w / 2),
+        ):
+            rect = (cx - toggle_w / 2, toggle_y - toggle_h / 2, cx + toggle_w / 2, toggle_y + toggle_h / 2)
+            if name == "neighbor":
+                self.neighbor_toggle_rect = rect
+            else:
+                self.gap_toggle_rect = rect
+            if active:
+                hud.draw_pill(cx, toggle_y, toggle_w, toggle_h, fill=(*hud.F1_RED, 200), border=(255, 120, 110, 120))
+            else:
+                hud.draw_pill(cx, toggle_y, toggle_w, toggle_h)
+            cached_text(label, cx, toggle_y, hud.TEXT if active else hud.TEXT_DIM, 9, bold=True,
+                        anchor_x="center", anchor_y="center").draw()
+
+        has_logos = bool(self._team_logos)
+        left_x = self.x
+        right_x = self.x + self.width
+        name_x = left_x + (58 if has_logos else 34)
+
+        # Row backgrounds (team colour bars, selection highlight, separators) only change
+        # when the order or the selection does, so they are cached as one shape list.
+        order = tuple(code for code, _, _, _ in new_entries)
+        row_colors = tuple(tuple(color) for _, color, _, _ in new_entries)
+        selected = tuple(c for c in order if c in self.selected)
+
+        def build_rows():
+            for i, code in enumerate(order):
+                top_y = rows_top - i * self.row_height
+                cy = top_y - self.row_height / 2
+                if code in selected:
+                    points = hud._rounded_points(left_x - 4, top_y - self.row_height + 1, self.width + 8, self.row_height - 2, 6)
+                    yield arcade.shape_list.create_polygon(points, (*hud.F1_RED, 70))
+                    yield arcade.shape_list.create_line_loop(points, (*hud.F1_RED, 170), 1)
+                elif i > 0:
+                    yield arcade.shape_list.create_line(left_x + 4, top_y, right_x - 4, top_y, (255, 255, 255, 12), 1)
+                yield arcade.shape_list.create_rectangle_filled(left_x + 25, cy, 3, 14, row_colors[i])
+
+        hud.cached_shapes(("lb-rows", order, row_colors, selected, left_x, rows_top, self.width, self.row_height), build_rows).draw()
+
+        self.rects = []
         for i, (code, color, pos, progress_m) in enumerate(new_entries):
             current_pos = i + 1
-            top_y = leaderboard_y - 30 - ((current_pos - 1) * self.row_height)
+            top_y = rows_top - i * self.row_height
             bottom_y = top_y - self.row_height
-            left_x = self.x
-            right_x = self.x + self.width
+            cy = round(top_y - self.row_height / 2)
             self.rects.append((code, left_x, bottom_y, right_x, top_y))
 
-            if code in self.selected:
-                rect = arcade.XYWH((left_x + right_x)/2, (top_y + bottom_y)/2, right_x - left_x, top_y - bottom_y)
-                arcade.draw_rect_filled(rect, arcade.color.LIGHT_GRAY)
-                text_color = arcade.color.BLACK
-            else:
-                text_color = color
+            cached_text(str(current_pos), left_x + 16, cy, hud.TEXT_DIM, 12, bold=True,
+                        anchor_x="right", anchor_y="center").draw()
 
-            text = f"{current_pos}. {code}" 
-            if pos.get("rel_dist",0) != 1:
-                out_text=""
-            else:
-                out_text="  OUT"
-
-            if pos.get("in_pit"):
-                driver_text = text
-                pit_text="  PIT"
-            else:
-                driver_text = text
-                pit_text = ""
-
-            # Team logo in front of the name, scaled to fit a 26x16 box
+            # Team logo in front of the name, scaled to fit a 22x14 box
             logo = self._team_logos.get(code)
             if logo:
-                scale = min(26 / logo.width, 16 / logo.height)
-                arcade.draw_texture_rect(logo, arcade.XYWH(left_x + 13, top_y - 12, logo.width * scale, logo.height * scale))
-            name_x = left_x + 32 if self._team_logos else left_x
+                scale = min(22 / logo.width, 14 / logo.height)
+                arcade.draw_texture_rect(logo, arcade.XYWH(left_x + 43, cy, logo.width * scale, logo.height * scale))
 
-            cached_text(driver_text,name_x,top_y - 1,text_color,13,font_name=self._display_font,anchor_x="left",anchor_y="top").draw()
+            cached_text(code, name_x, cy, hud.TEXT, 11, font_name=hud.DISPLAY_FONT,
+                        anchor_x="left", anchor_y="center").draw()
 
-            #PIT indicator in white
-            if pit_text:cached_text(pit_text, name_x + 84, top_y,arcade.color.WHITE,16,anchor_x="left",anchor_y="top").draw()
-
-            #OUT indicator in red
-            if out_text: cached_text(out_text, name_x + 84, top_y, (155,17,30), 16, anchor_x="left", anchor_y="top",bold=True).draw()
+            # OUT (retired) in red, PIT in amber
+            if pos.get("rel_dist", 0) == 1:
+                cached_text("OUT", name_x + 56, cy, (255, 90, 80), 11, bold=True, anchor_x="left", anchor_y="center").draw()
+            elif pos.get("in_pit"):
+                cached_text("PIT", name_x + 56, cy, hud.AMBER, 11, bold=True, anchor_x="left", anchor_y="center").draw()
 
             # Gap display (if enabled)
+            gap_text = ""
             if getattr(self, "show_neighbor_gaps", False):
                 neighbor_info = self.computed_neighbor_gaps.get(code)
 
                 if i == 0:
                     gap_text = "-"
-                else:
-                    if neighbor_info:
-                        if neighbor_info.get("ahead"):
-                            _, dist_m, time_s = neighbor_info.get("ahead")
-                            gap_text = f"+{time_s:.1f}s"
-                        else:
-                            gap_text = ""
-                    else:
-                        gap_text = ""
+                elif neighbor_info and neighbor_info.get("ahead"):
+                    _, dist_m, time_s = neighbor_info.get("ahead")
+                    gap_text = f"+{time_s:.1f}s"
 
             elif getattr(self, "show_gaps", False):
-                gap_text = ""
-                gap_val = None
                 gap_val = self.computed_gaps.get(code)
                 if gap_val is None:
                     gap_val = pos.get("gap") or pos.get("gap_to_leader")
-                if gap_val is None:
-                    gap_text = ""
-                else:
+                if gap_val is not None:
                     try:
                         # expect seconds (float)
                         s = float(gap_val)
@@ -500,15 +454,8 @@ class LeaderboardComponent(BaseComponent):
                     except Exception:
                         gap_text = str(gap_val)
 
-                pass
-
-            # if either leader or neighbor gaps are enabled, draw the gap text
-            if getattr(self, "show_neighbor_gaps", False) or getattr(self, "show_gaps", False):
-                gap_x = right_x - 36
-                if 'gap_text' in locals() and gap_text:
-                    gap_color = arcade.color.BLACK if code in self.selected else arcade.color.LIGHT_GRAY
-                    # Update and draw the reusable gap Text object
-                    cached_text(gap_text, gap_x, top_y, gap_color, 12, anchor_x="right", anchor_y="top").draw()
+            if gap_text:
+                cached_text(gap_text, right_x - 36, cy, hud.TEXT_DIM, 11, anchor_x="right", anchor_y="center").draw()
 
             # Tyre Icons
             tyre_val = pos.get("tyre", "?")
@@ -516,7 +463,7 @@ class LeaderboardComponent(BaseComponent):
             if tyre_texture:
                 # position tyre icon inside the leaderboard area so it doesn't collide with track
                 tyre_icon_x = left_x + self.width - 10
-                tyre_icon_y = top_y - 12
+                tyre_icon_y = cy
                 icon_size = 16
                 rect = arcade.XYWH(tyre_icon_x, tyre_icon_y, icon_size, icon_size)
 
@@ -546,7 +493,7 @@ class LeaderboardComponent(BaseComponent):
                     window.ctx.scissor = (int(tyre_icon_x - 8), int(tyre_icon_y - 8), int(icon_size), int(bright_height))
                     arcade.draw_texture_rect(rect=rect, texture=tyre_texture, alpha=255)
                     window.ctx.scissor = None
-                    
+
                 try:
                     life_display = str(int(current_life)) if pd.notna(current_life) else "0"
                 except (ValueError, TypeError):
@@ -555,33 +502,24 @@ class LeaderboardComponent(BaseComponent):
                     life_display,
                     tyre_icon_x + 8,
                     tyre_icon_y - 8,
-                    arcade.color.WHITE,
+                    hud.TEXT,
                     8,
                     bold=True,
                     anchor_x="center",
                     anchor_y="center"
                 ).draw()
 
-                # DRS Indicator
+                # DRS Indicator: dot to the left of the tyre icon, green while DRS is open
                 drs_val = pos.get("drs", 0)
-                # DRS is active if value >= 10
                 is_drs_on = drs_val and int(drs_val) >= 10
-                drs_color = arcade.color.GREEN if is_drs_on else arcade.color.GRAY
-                
-                # Position dot to the left of the tyre icon
-                # tyre_icon_x is the center of the tyre icon
-                drs_dot_x = tyre_icon_x - icon_size - 4 
-                drs_dot_y = tyre_icon_y
-
-                arcade.draw_circle_filled(drs_dot_x, drs_dot_y, 4, drs_color)
-
-        
+                drs_color = hud.GREEN if is_drs_on else (255, 255, 255, 40)
+                arcade.draw_circle_filled(tyre_icon_x - icon_size - 4, tyre_icon_y, 3.5, drs_color)
 
         # Add text at the bottom of the leaderboard during lap 1 to alert the user to potential mis-ordering
-        if new_entries[0][2].get("lap", 0) == 1:
+        if lap_one:
             cached_text("May be inaccurate during Lap 1",
-                        self.x, leaderboard_y - 30 - (len(new_entries) * self.row_height) - 20,
-                        arcade.color.YELLOW, 12, anchor_x="left", anchor_y="top").draw()
+                        self.x + 4, rows_top - (len(new_entries) * self.row_height) - 8,
+                        hud.AMBER, 10, anchor_x="left", anchor_y="top").draw()
 
     def on_mouse_press(self, window, x: float, y: float, button: int, modifiers: int):
         # interval toggle (radio type)
@@ -909,37 +847,9 @@ class DriverInfoComponent(BaseComponent):
         top, bottom = center_y + box_height / 2, center_y - box_height / 2
         left, right = center_x - box_width / 2, center_x + box_width / 2
 
-        rect = arcade.XYWH(center_x, center_y, box_width, box_height)
-        arcade.draw_rect_filled(rect, (0, 0, 0, 200))
+        team_color = tuple(window.driver_colors.get(code, arcade.color.GRAY))
+        hud.draw_panel(left, bottom, box_width, box_height, accent=team_color)
 
-        team_color = window.driver_colors.get(code, arcade.color.GRAY)
-        arcade.draw_rect_outline(rect, team_color, 2)
-
-        header_height = 30
-        header_cy = top - (header_height / 2)
-        arcade.draw_rect_filled(arcade.XYWH(center_x, header_cy, box_width, header_height), team_color)
-        cached_text(f"Driver: {code}", left + 10, header_cy, arcade.color.BLACK, 14, anchor_y="center",
-                    bold=True).draw()
-
-        cursor_y, row_gap = top - header_height - 25, 25
-        left_text_x = left + 15
-
-        # Telemetry Text
-        speed = driver_pos.get('speed', 0)
-        cached_text(f"Speed: {speed:.0f} km/h", left + 15, cursor_y, arcade.color.WHITE, 12, anchor_y="center").draw()
-        cursor_y -= row_gap
-        cached_text(f"Gear: {driver_pos.get('gear', '-')}", left + 15, cursor_y, arcade.color.WHITE, 12,
-                    anchor_y="center").draw()
-        cursor_y -= row_gap
-
-        drs_val = driver_pos.get('drs', 0)
-        drs_str, drs_color = ("DRS: ON", arcade.color.GREEN) if drs_val in [10, 12, 14] else \
-            ("DRS: AVAIL", arcade.color.YELLOW) if drs_val == 8 else ("DRS: OFF", arcade.color.GRAY)
-        cached_text(drs_str, left + 15, cursor_y, drs_color, 12, anchor_y="center", bold=True).draw()
-        cursor_y -= row_gap
-
-        # Gaps (Calculated from Leaderboard)
-        gap_ahead, gap_behind = "Ahead: N/A", "Behind: N/A"
         lb = getattr(window, "leaderboard", None) or \
              getattr(window, "leaderboard_ui", None) or \
              getattr(window, "leaderboard_comp", None)
@@ -950,10 +860,53 @@ class DriverInfoComponent(BaseComponent):
                     lb = comp
                     break
 
+        # Header: team logo, driver code and current position
+        header_cy = top - 24
+        name_x = left + 16
+        logo = (getattr(lb, "_team_logos", None) or {}).get(code)
+        if logo:
+            scale = min(28 / logo.width, 18 / logo.height)
+            arcade.draw_texture_rect(logo, arcade.XYWH(left + 30, header_cy, logo.width * scale, logo.height * scale))
+            name_x = left + 52
+        cached_text(code, name_x, header_cy, hud.TEXT, 15, font_name=hud.DISPLAY_FONT, anchor_y="center").draw()
+
+        lb_index = None
         if lb and hasattr(lb, "entries") and lb.entries:
+            lb_index = next((i for i, e in enumerate(lb.entries) if e[0] == code), None)
+        if lb_index is not None:
+            cached_text(f"P{lb_index + 1}", right - 16, header_cy, hud.TEXT_DIM, 13,
+                        font_name=hud.DISPLAY_FONT, anchor_x="right", anchor_y="center").draw()
+
+        # Speed and gear as large numbers
+        stat_y = top - 72
+        speed = driver_pos.get('speed', 0)
+        hud.draw_section_title("SPEED", left + 16, stat_y + 30)
+        speed_text = cached_text(f"{speed:.0f}", left + 16, stat_y, hud.TEXT, 22,
+                                 font_name=hud.DISPLAY_FONT, anchor_y="center")
+        speed_text.draw()
+        cached_text("km/h", left + 20 + speed_text.content_width, stat_y - 6, hud.TEXT_DIM, 11, anchor_y="center").draw()
+
+        hud.draw_section_title("GEAR", left + 150, stat_y + 30)
+        cached_text(f"{driver_pos.get('gear', '-')}", left + 150, stat_y, hud.TEXT, 22,
+                    font_name=hud.DISPLAY_FONT, anchor_y="center").draw()
+
+        # DRS state as a pill
+        drs_val = driver_pos.get('drs', 0)
+        drs_str, drs_color = ("DRS ON", hud.GREEN) if drs_val in [10, 12, 14] else \
+            ("DRS AVAIL", hud.AMBER) if drs_val == 8 else ("DRS OFF", hud.TEXT_DIM)
+        pill_cy = top - 108
+        hud.draw_pill(left + 16 + 40, pill_cy, 80, 20, fill=(*drs_color[:3], 36), border=(*drs_color[:3], 100))
+        cached_text(drs_str, left + 56, pill_cy, drs_color, 10, bold=True,
+                    anchor_x="center", anchor_y="center").draw()
+
+        cursor_y = top - 138
+        left_text_x = left + 16
+
+        # Gaps (Calculated from Leaderboard)
+        gap_ahead, gap_behind = "Ahead: N/A", "Behind: N/A"
+        if lb_index is not None:
             try:
-                idx = next(i for i, e in enumerate(lb.entries) if e[0] == code)
-                curr_pos = lb.entries[idx][3]
+                curr_pos = lb.entries[lb_index][3]
 
                 def get_gap_str(neighbor_idx, prefix, sign):
                     n_code, _, _, n_pos = lb.entries[neighbor_idx]
@@ -961,80 +914,58 @@ class DriverInfoComponent(BaseComponent):
                     time = dist / 55.56  # 200 km/h reference speed
                     return f"{prefix} ({n_code}): {sign}{time:.2f}s ({dist:.1f}m)"
 
-                if idx > 0:
-                    gap_ahead = get_gap_str(idx - 1, "Ahead", "+")
-                if idx < len(lb.entries) - 1:
-                    gap_behind = get_gap_str(idx + 1, "Behind", "-")
+                if lb_index > 0:
+                    gap_ahead = get_gap_str(lb_index - 1, "Ahead", "+")
+                if lb_index < len(lb.entries) - 1:
+                    gap_behind = get_gap_str(lb_index + 1, "Behind", "-")
 
-            except (StopIteration, IndexError):
+            except IndexError:
                 pass
 
-        cached_text(gap_ahead, left_text_x, cursor_y, arcade.color.LIGHT_GRAY, 11, anchor_y="center").draw()
-        cursor_y -= 22
-        cached_text(gap_behind, left_text_x, cursor_y, arcade.color.LIGHT_GRAY, 11, anchor_y="center").draw()
-        
+        cached_text(gap_ahead, left_text_x, cursor_y, hud.TEXT_DIM, 11, anchor_y="center").draw()
+        cursor_y -= 20
+        cached_text(gap_behind, left_text_x, cursor_y, hud.TEXT_DIM, 11, anchor_y="center").draw()
+
         if self.degradation_integrator and hasattr(window, 'frames'):
             try:
                 idx = min(int(window.frame_index), window.n_frames - 1)
                 frame = window.frames[idx]
                 health_data = self.degradation_integrator.get_health_for_frame(code, frame)
-                
+
                 if health_data:
-                    cursor_y -= 28  # Space before health bar
-                    
-                    # Draw tyre health bar
-                    bar_params = format_tyre_health_bar(health_data['health'], width=180, height=14)
-                    bar_x = left + 15
-                    bar_y = cursor_y
-                    
-                    # Background bar (dark gray)
-                    arcade.draw_rect_filled(
-                        arcade.XYWH(bar_x + bar_params['width']/2, bar_y, 
-                                   bar_params['width'], bar_params['height']),
-                        (50, 50, 50)
-                    )
-                    
-                    # Health fill bar (colored)
+                    cursor_y -= 24  # Space before health bar
+
+                    # Tyre health bar: rounded track with a coloured fill
+                    bar_params = format_tyre_health_bar(health_data['health'], width=180, height=8)
+                    bar_x = left + 16
+                    bar_h = bar_params['height']
+                    hud.draw_panel(bar_x, cursor_y - bar_h / 2, bar_params['width'], bar_h, radius=bar_h / 2,
+                                   fill=(255, 255, 255, 26), border=None)
                     if bar_params['fill_width'] > 0:
-                        arcade.draw_rect_filled(
-                            arcade.XYWH(bar_x + bar_params['fill_width']/2, bar_y, 
-                                       bar_params['fill_width'], bar_params['height']),
-                            bar_params['color']
-                        )
-                    
-                    # Border
-                    arcade.draw_rect_outline(
-                        arcade.XYWH(bar_x + bar_params['width']/2, bar_y, 
-                                   bar_params['width'], bar_params['height']),
-                        arcade.color.WHITE, 1
-                    )
-                    
-                    cursor_y -= 18
-                    
+                        arcade.draw_lrbt_rectangle_filled(bar_x, bar_x + bar_params['fill_width'],
+                                                          cursor_y - bar_h / 2, cursor_y + bar_h / 2, bar_params['color'])
+
+                    cursor_y -= 16
+
                     # Tyre info text
                     tyre_text = format_degradation_text(health_data)
-                    cached_text(tyre_text, left_text_x, cursor_y, 
-                               arcade.color.LIGHT_GRAY, 10, anchor_y="center").draw()
-                    
+                    cached_text(tyre_text, left_text_x, cursor_y,
+                               hud.TEXT_DIM, 10, anchor_y="center").draw()
+
             except (KeyError, AttributeError, TypeError) as e:
                 print(f"Error displaying driver info: {e}")
 
-        # Graphs
+        # Throttle and brake as slim vertical gauges on the right
         thr, brk = driver_pos.get('throttle', 0), driver_pos.get('brake', 0)
         t_r, b_r = max(0.0, min(1.0, thr / 100.0)), max(0.0, min(1.0, brk / 100.0 if brk > 1.0 else brk))
-        bar_w, bar_h, b_y = 20, 80, bottom + 35
-        r_center = right - 50
-
-        # Throttle
-        cached_text("THR", r_center - 15, b_y - 20, arcade.color.WHITE, 10, anchor_x="center").draw()
-        arcade.draw_rect_filled(arcade.XYWH(r_center - 15, b_y + bar_h / 2, bar_w, bar_h), arcade.color.DARK_GRAY)
-        if t_r > 0: arcade.draw_rect_filled(arcade.XYWH(r_center - 15, b_y + (bar_h * t_r) / 2, bar_w, bar_h * t_r),
-                                            arcade.color.GREEN)
-        # Brake
-        cached_text("BRK", r_center + 15, b_y - 20, arcade.color.WHITE, 10, anchor_x="center").draw()
-        arcade.draw_rect_filled(arcade.XYWH(r_center + 15, b_y + bar_h / 2, bar_w, bar_h), arcade.color.DARK_GRAY)
-        if b_r > 0: arcade.draw_rect_filled(arcade.XYWH(r_center + 15, b_y + (bar_h * b_r) / 2, bar_w, bar_h * b_r),
-                                            arcade.color.RED)
+        bar_w, bar_h, b_y = 10, 76, top - 168
+        for i, (label, ratio, color) in enumerate((("THR", t_r, hud.GREEN), ("BRK", b_r, hud.F1_RED))):
+            bx = right - 54 + i * 30
+            hud.draw_panel(bx - bar_w / 2, b_y, bar_w, bar_h, radius=bar_w / 2, fill=(255, 255, 255, 22), border=None)
+            if ratio > 0:
+                arcade.draw_lrbt_rectangle_filled(bx - bar_w / 2, bx + bar_w / 2, b_y, b_y + bar_h * ratio, color)
+            cached_text(label, bx, b_y - 12, hud.TEXT_FAINT, 9, bold=True,
+                        anchor_x="center", anchor_y="center").draw()
 
     def _get_driver_color(self, window, code):
         return window.driver_colors.get(code, arcade.color.GRAY)
@@ -1121,31 +1052,37 @@ class ControlsPopupComponent(BaseComponent):
             return
         cx = self.cx if self.cx is not None else window.width / 2
         cy = self.cy if self.cy is not None else window.height / 2
-        rect = arcade.XYWH(cx, cy, self.width, self.height)
-        arcade.draw_rect_filled(rect, (0, 0, 0, 255))
-        arcade.draw_rect_outline(rect, arcade.color.GRAY, 2)
-
-        header_height = max(28, int(self.header_font_size * 2))
-        header_cy = cy + self.height / 2 - header_height / 2
-        arcade.draw_rect_filled(arcade.XYWH(cx, header_cy, self.width, header_height), arcade.color.GRAY)
-        
-        cached_text("Controls", cx - self.width / 2 + 12, header_cy, arcade.color.BLACK,
-                    self.header_font_size, bold=True, anchor_x="left", anchor_y="center").draw()
+        left, top = round(cx - self.width / 2), round(cy + self.height / 2)
+        hud.draw_panel(left, top - self.height, self.width, self.height, radius=16,
+                       fill=(20, 22, 29, 245), accent=hud.F1_RED)
+        hud.draw_section_title("CONTROLS", left + 18, top - 18, color=hud.TEXT, size=11)
 
         controls = self.lines if self.lines is not None else self._default_lines()
-        
+
         line_spacing = max(18, int(self.body_font_size + 8))
-        left_x = cx - self.width / 2 + 16
-        desc_x = cx - self.width / 2 + 100  # Fixed position for descriptions
-        y = header_cy - 35  # More space below header
+        key_x = left + 18
+        y = top - 54
 
-        for key, desc in controls:
-            # Draw key
-            cached_text(key, left_x, y, arcade.color.WHITE, self.body_font_size, bold=True,
-                        anchor_x="left", anchor_y="center").draw()
+        def key_name(key):
+            # The text font has no arrow glyphs, so arrows are spelled out
+            for arrow, name in (("←", "Left"), ("→", "Right"), ("↑", "Up"), ("↓", "Down")):
+                key = key.replace(arrow, name)
+            return key.replace(" / ", "/")
 
-            # Draw description
-            cached_text(desc, desc_x, y, arcade.color.LIGHT_GRAY, self.body_font_size, bold=False,
+        key_labels = [
+            cached_text(key_name(key), key_x + 8, y - i * line_spacing, hud.TEXT, self.body_font_size - 2,
+                        bold=True, anchor_x="left", anchor_y="center")
+            for i, (key, _) in enumerate(controls)
+        ]
+        # Descriptions line up just after the widest keycap
+        desc_x = round(key_x + max([label.content_width for label in key_labels] + [40]) + 28)
+
+        for key_label, (_, desc) in zip(key_labels, controls):
+            hud.draw_panel(key_x, y - 10, key_label.content_width + 16, 20, radius=6,
+                           fill=(255, 255, 255, 26), border=(255, 255, 255, 36))
+            key_label.draw()
+
+            cached_text(desc, desc_x, y, hud.TEXT_DIM, self.body_font_size, bold=False,
                         anchor_x="left", anchor_y="center").draw()
 
             y -= line_spacing
@@ -1195,110 +1132,50 @@ class ConstructorsChampionshipOverlay:
         if not self.visible:
             return
 
-        y = self.y
+        if not self.team_colors and self.session is not None:
+            for driver in self.session.drivers:
+                team = self.session.get_driver(driver)["TeamName"]
 
-        arcade.draw_text(
-            "Constructors Championship Standings",
-            self.x,
-            y,
-            arcade.color.WHITE,
-            14,
-            bold=True
-        )
+                if team not in self.team_colors:
+                    try:
+                        color_hex = fastf1.plotting.get_team_color(team, self.session)
+                        hex_color = color_hex.lstrip("#")
+                        rgb = tuple(int(hex_color[i:i+2], 16) for i in (0,2,4))
+                        self.team_colors[team] = rgb
+                    except:
+                        self.team_colors[team] = (200,200,200)
 
-        y -= 25
-
-        self.team_colors = {}
-
-        for driver in self.session.drivers:
-            team = self.session.get_driver(driver)["TeamName"]
-
-            if team not in self.team_colors:
-                try:
-                    color_hex = fastf1.plotting.get_team_color(team, self.session)
-                    hex_color = color_hex.lstrip("#")
-                    rgb = tuple(int(hex_color[i:i+2], 16) for i in (0,2,4))
-                    self.team_colors[team] = rgb
-                except:
-                    self.team_colors[team] = (200,200,200)
+        rows = list(self.cached_lap_standings.items())[:11]
+        previous_order = list(self.current_constructors_standings.keys())
+        _draw_standings_panel("CONSTRUCTORS STANDINGS", self.x, self.y, 300, [
+            (team, self.team_colors.get(team, (200, 200, 200)), pts,
+             pts - self.current_constructors_standings.get(team, 0),
+             (previous_order.index(team) + 1 if team in previous_order else pos) - pos)
+            for pos, (team, pts) in enumerate(rows, start=1)
+        ], name_font=None)
 
 
-        for pos, (team, pts) in enumerate(self.cached_lap_standings.items(), start=1):
+def _draw_standings_panel(title, x, y, width, rows, name_font=hud.DISPLAY_FONT):
+    """Glass table of (name, colour, points, gained, places_moved) rows with its title at (x, y)."""
+    row_h = 20
+    top = y + 30
+    height = 44 + len(rows) * row_h
+    hud.draw_panel(x - 16, top - height, width + 32, height, fill=(20, 22, 29, 235))
+    hud.draw_section_title(title, x, top - 14)
+    for pos, (name, color, pts, gained, delta) in enumerate(rows, start=1):
+        cy = top - 38 - (pos - 1) * row_h - row_h / 2
+        arcade.draw_lrbt_rectangle_filled(x + 22, x + 25, cy - 7, cy + 7, color)
+        cached_text(str(pos), x + 14, cy, hud.TEXT_DIM, 12, bold=True,
+                    anchor_x="right", anchor_y="center").draw()
+        style = {"font_name": name_font} if name_font else {}
+        cached_text(str(name), x + 32, cy, hud.TEXT, 10 if name_font else 12, anchor_y="center", **style).draw()
+        cached_text(f"{pts:.0f}", x + width - 70, cy, hud.TEXT, 12, bold=True, anchor_x="right", anchor_y="center").draw()
+        if gained > 0:
+            cached_text(f"+{gained:.0f}", x + width - 30, cy, hud.GREEN, 11, anchor_x="right", anchor_y="center").draw()
+        arrow, arrow_color = ("▲", hud.GREEN) if delta > 0 else ("▼", hud.F1_RED) if delta < 0 else ("•", hud.TEXT_FAINT)
+        cached_text(arrow, x + width - 4, cy, arrow_color, 10, anchor_x="right", anchor_y="center").draw()
 
-            base_pts = self.current_constructors_standings.get(team, 0)
-            gained = pts - base_pts
 
-            color = self.team_colors.get(team, (200,200,200))
-
-            # team bar
-            arcade.draw_rect_filled(
-            arcade.XYWH(self.x - 6, y+6, 4, 16),
-            color
-            )
-
-            # position
-            arcade.draw_text(
-                f"{pos}",
-                self.x,
-                y,
-                arcade.color.WHITE,
-                12
-            )
-
-            # team
-            arcade.draw_text(
-                team,
-                self.x + 22,
-                y,
-                arcade.color.WHITE,
-                12
-            )
-
-            # points
-            arcade.draw_text(
-                f"{pts:.0f}",
-                self.x +180,
-                y,
-                arcade.color.WHITE,
-                12
-            )
-
-            # gained points
-            if gained > 0:
-                arcade.draw_text(
-                    f"+{gained:.0f}",
-                    self.x + 220,
-                    y,
-                    arcade.color.LIME_GREEN,
-                    12
-                )
-
-            y -= 20
-
-            if pos >= 11:
-                break
-
-            previous_pos = list(self.current_constructors_standings.keys()).index(team) + 1 if team in self.current_constructors_standings else pos
-            delta = previous_pos - pos
-
-            if delta > 0:
-                arrow = "▲"
-                arrow_color = arcade.color.LIME_GREEN
-            elif delta < 0:
-                arrow = "▼"
-                arrow_color = arcade.color.RED
-            else:
-                arrow = "•"
-                arrow_color = arcade.color.GRAY
-
-            arcade.draw_text(
-            arrow,
-            self.x + 280,
-            y,
-            arrow_color,
-            12
-        )
-        
 class DriversChampionshipOverlay:
 
     def __init__(self, live_standings=None, current_driver_standings=None,driver_colors=None,
@@ -1324,95 +1201,67 @@ class DriversChampionshipOverlay:
         if not self.visible:
             return
 
-        y = self.y
+        rows = list(self.cached_lap_standings.items())[:22]
+        previous_order = list(self.current_driver_standings.keys())
+        _draw_standings_panel("DRIVER STANDINGS", self.x, self.y, 200, [
+            (driver, tuple(self.driver_colors.get(driver, (200, 200, 200))), pts,
+             pts - self.current_driver_standings.get(driver, 0),
+             (previous_order.index(driver) + 1 if driver in previous_order else pos) - pos)
+            for pos, (driver, pts) in enumerate(rows, start=1)
+        ])
 
-        arcade.draw_text(
-            "Driver Championship Standings",
-            self.x,
-            y,
-            arcade.color.WHITE,
-            14,
-            bold=True
-        )
+class RaceStatusComponent(BaseComponent):
+    """Top-left glass card: current lap, race clock, playback speed and track status."""
 
-        y -= 25
+    TRACK_STATUS = {
+        "2": ("YELLOW FLAG", (255, 214, 10)),
+        "4": ("SAFETY CAR", (255, 140, 0)),
+        "5": ("RED FLAG", hud.F1_RED),
+        "6": ("VIRTUAL SC", (255, 186, 90)),
+        "7": ("VSC ENDING", (255, 186, 90)),
+    }
 
-        for pos, (driver, pts) in enumerate(self.cached_lap_standings.items(), start=1):
+    def __init__(self, left=20, width=300, height=120):
+        self.left = left
+        self.width = width
+        self.height = height
 
-            base_pts = self.current_driver_standings.get(driver, 0)
-            gained = pts - base_pts
+    def draw(self, window, lap, total_laps, time_str, playback_speed, track_status):
+        top = window.height - 20
+        left = self.left
+        hud.draw_panel(left, top - self.height, self.width, self.height)
 
-            # team color
-            color = self.driver_colors.get(driver, (200,200,200))
+        # Lap counter
+        hud.draw_section_title("LAP", left + 16, top - 14)
+        lap_label = cached_text(str(lap), left + 16, top - 54, hud.TEXT, 26,
+                                font_name=hud.DISPLAY_FONT, anchor_y="center")
+        lap_label.draw()
+        if total_laps:
+            cached_text(f"/{total_laps}", left + 22 + lap_label.content_width, top - 60, hud.TEXT_DIM, 13,
+                        font_name=hud.DISPLAY_FONT, anchor_y="center").draw()
 
-            # team bar
-            arcade.draw_rect_filled(
-            arcade.XYWH(self.x - 6, y+6, 4, 16),
-            color
-            )
+        # Race clock
+        clock_x = left + 160
+        hud.draw_section_title("RACE TIME", clock_x, top - 14)
+        cached_text(time_str, clock_x, top - 52, hud.TEXT, 15, font_name=hud.DISPLAY_FONT, anchor_y="center").draw()
 
-            # position
-            arcade.draw_text(
-                f"{pos}",
-                self.x,
-                y,
-                arcade.color.WHITE,
-                12
-            )
+        # Bottom row: playback speed and track status pills
+        row_y = round(top - self.height + 22)
+        speed_text = f"{playback_speed}x"
+        hud.draw_pill(left + 16 + 28, row_y, 56, 22)
+        cached_text(speed_text, left + 44, row_y, hud.TEXT, 11, bold=True,
+                    anchor_x="center", anchor_y="center").draw()
 
-            # driver
-            arcade.draw_text(
-                driver,
-                self.x + 22,
-                y,
-                arcade.color.WHITE,
-                12
-            )
+        label, color = self.TRACK_STATUS.get(str(track_status), ("GREEN FLAG", hud.GREEN))
+        flagged = str(track_status) in self.TRACK_STATUS
+        pill_w = 132
+        pill_cx = left + 16 + 56 + 10 + pill_w / 2
+        hud.draw_pill(pill_cx, row_y, pill_w, 22,
+                      fill=(*color[:3], 200 if flagged else 36), border=(*color[:3], 220 if flagged else 90))
+        text_color = (20, 20, 24) if flagged and str(track_status) != "5" else (hud.TEXT if flagged else color)
+        cached_text(label, pill_cx, row_y, text_color, 11, bold=True,
+                    anchor_x="center", anchor_y="center").draw()
 
-            # points
-            arcade.draw_text(
-                f"{pts:.0f}",
-                self.x + 80,
-                y,
-                arcade.color.WHITE,
-                12
-            )
-
-            # gained points
-            if gained > 0:
-                arcade.draw_text(
-                    f"+{gained:.0f}",
-                    self.x + 120,
-                    y,
-                    arcade.color.LIME_GREEN,
-                    12
-                )
-
-            y -= 20
-
-            if pos >= 22:
-                break
-
-            previous_pos = list(self.current_driver_standings.keys()).index(driver) + 1 if driver in self.current_driver_standings else pos
-            delta = previous_pos - pos
-
-            if delta > 0:
-                arrow = "▲"
-                arrow_color = arcade.color.LIME_GREEN
-            elif delta < 0:
-                arrow = "▼"
-                arrow_color = arcade.color.RED
-            else:
-                arrow = "•"
-                arrow_color = arcade.color.GRAY
-
-            arcade.draw_text(
-            arrow,
-            self.x + 200,
-            y,
-            arrow_color,
-            12
-        )
 
 class SessionInfoComponent(BaseComponent):
     """
@@ -1446,18 +1295,13 @@ class SessionInfoComponent(BaseComponent):
         if not self.visible or not self.session_info:
             return
         
-        # Banner dimensions
-        banner_height = 60
-        banner_width = min(900, window.width - 40)
+        # Glass banner between the lap card (left) and the leaderboard (right)
+        banner_height = 56
+        banner_width = max(320, min(760, window.width - 2 * 360))
         center_x = window.width / 2
-        top_y = window.height - 10
-        bottom_y = top_y - banner_height
-        
-        # Draw semi-transparent background
-        rect = arcade.XYWH(center_x, top_y - banner_height/2, banner_width, banner_height)
-        arcade.draw_rect_filled(rect, (20, 20, 20, 220))
-        arcade.draw_rect_outline(rect, arcade.color.GRAY, 2)
-        
+        top_y = window.height - 20
+        hud.draw_panel(center_x - banner_width / 2, top_y - banner_height, banner_width, banner_height)
+
         # Get info
         event = self.session_info.get('event_name', '')
         circuit = self.session_info.get('circuit_name', '')
@@ -1466,35 +1310,31 @@ class SessionInfoComponent(BaseComponent):
         round_num = self.session_info.get('round', '')
         date = self.session_info.get('date', '')
         total_laps = self.session_info.get('total_laps', '')
-        
-        # Line 1: Event Name | Circuit | Country
-        line1_parts = []
-        if event:
-            line1_parts.append(f"🏁 {event}")
-        if circuit:
-            line1_parts.append(circuit)
+
+        # Line 1: event name, with a red accent mark in front
+        title = str(event or circuit).upper()
+        title_label = cached_text(title, center_x + 9, top_y - 20, hud.TEXT, 12,
+                                  font_name=hud.DISPLAY_FONT, anchor_x="center", anchor_y="center")
+        mark_x = center_x - title_label.content_width / 2 - 6
+        arcade.draw_lrbt_rectangle_filled(mark_x - 4, mark_x, top_y - 27, top_y - 13, hud.F1_RED)
+        title_label.draw()
+
+        # Line 2: Circuit · Country · Year Round X · Date · X Laps
+        parts = []
+        if circuit and circuit != event:
+            parts.append(circuit)
         if country:
-            line1_parts.append(f"🌍 {country}")
-        
-        line1 = " | ".join(line1_parts)
-        
-        # Line 2: Year Round X | Date | X Laps
-        line2_parts = []
+            parts.append(str(country))
         if year and round_num:
-            line2_parts.append(f"📅 {year} Round {round_num}")
+            parts.append(f"{year} Round {round_num}")
         elif year:
-            line2_parts.append(f"📅 {year}")
+            parts.append(str(year))
         if date:
-            line2_parts.append(date)
+            parts.append(str(date))
         if total_laps:
-            line2_parts.append(f"{total_laps} Laps")
-        
-        line2 = " | ".join(line2_parts)
-        
-        # Draw text lines
-        cached_text(line1, center_x, top_y - 18, arcade.color.WHITE, 16, bold=True,
-                    anchor_x="center", anchor_y="center").draw()
-        cached_text(line2, center_x, top_y - 40, arcade.color.LIGHT_GRAY, 13, bold=False,
+            parts.append(f"{total_laps} Laps")
+
+        cached_text("  ·  ".join(parts), center_x, top_y - 41, hud.TEXT_DIM, 12,
                     anchor_x="center", anchor_y="center").draw()
 
 
@@ -1522,16 +1362,16 @@ class RaceProgressBarComponent(BaseComponent):
     
     # Color palette following F1 conventions
     COLORS = {
-        "background": (30, 30, 30, 200),
-        "progress_fill": (0, 180, 0),
-        "progress_border": (100, 100, 100),
-        "dnf": (220, 50, 50),
-        "lap_marker": (80, 80, 80),
-        "yellow_flag": (255, 220, 0),
-        "red_flag": (220, 30, 30),
+        "background": (255, 255, 255, 30),
+        "progress_fill": hud.F1_RED,
+        "progress_border": (255, 255, 255, 40),
+        "dnf": (255, 90, 80),
+        "lap_marker": (255, 255, 255, 34),
+        "yellow_flag": (255, 214, 10),
+        "red_flag": (225, 6, 0),
         "safety_car": (255, 140, 0),
-        "vsc": (255, 165, 0),
-        "text": (220, 220, 220),
+        "vsc": (255, 186, 90),
+        "text": hud.TEXT_FAINT,
         "current_position": (255, 255, 255),
     }
     
@@ -1644,75 +1484,62 @@ class RaceProgressBarComponent(BaseComponent):
         # Skip rendering entirely if hidden
         if not self._visible:
             return
-            
+
         self._calculate_bar_dimensions(window)
-        
+
         current_frame = int(getattr(window, 'frame_index', 0))
-        
+
         bar_center_y = self.bottom + self.height / 2
-        
-        # 1. Draw background bar
-        bg_rect = arcade.XYWH(
-            self._bar_left + self._bar_width / 2,
-            bar_center_y,
-            self._bar_width,
-            self.height
-        )
-        arcade.draw_rect_filled(bg_rect, self.COLORS["background"])
-        arcade.draw_rect_outline(bg_rect, self.COLORS["progress_border"], 2)
-        
-        # 2. Draw progress fill
-        if self._total_frames > 0:
-            progress_ratio = min(1.0, current_frame / self._total_frames)
-            progress_width = progress_ratio * self._bar_width
-            if progress_width > 0:
-                progress_rect = arcade.XYWH(
-                    self._bar_left + progress_width / 2,
-                    bar_center_y,
-                    progress_width,
-                    self.height - 4
-                )
-                arcade.draw_rect_filled(progress_rect, self.COLORS["progress_fill"])
-        
-        # 3. Draw lap markers (vertical lines)
+        track_h = 6
+
+        # 1. Glass panel, track, lap ticks and event markers only change on resize,
+        #    so they are built once as a shape list.
+        key = ("progress-static", self._bar_left, self._bar_width, self.bottom, self.height,
+               self._total_laps, self._total_frames, len(self._events))
+        hud.draw_panel(self._bar_left - 14, self.bottom - 20, self._bar_width + 28, self.height + self.marker_height + 26,
+                       radius=12)
+        hud.cached_shapes(key, lambda: self._build_static_shapes(bar_center_y, track_h)).draw()
+
+        # Lap numbers for first/last and every 10 laps
         if self._total_laps > 1:
             for lap in range(1, self._total_laps + 1):
-                # Approximate frame for lap transition
-                lap_frame = int((lap / self._total_laps) * self._total_frames)
-                lap_x = self._frame_to_x(lap_frame)
-                
-                # Draw subtle vertical line
-                arcade.draw_line(
-                    lap_x, self.bottom + 2,
-                    lap_x, self.bottom + self.height - 2,
-                    self.COLORS["lap_marker"], 1
-                )
-                
-                # Draw lap number below for major laps (every 5 laps or first/last)
                 if lap == 1 or lap == self._total_laps or lap % 10 == 0:
+                    lap_x = self._frame_to_x(int((lap / self._total_laps) * self._total_frames))
                     cached_text(
                         str(lap),
-                        lap_x, self.bottom - 4,
+                        lap_x, self.bottom - 2,
                         self.COLORS["text"], 9,
                         anchor_x="center", anchor_y="top"
                     ).draw()
-        
-        # 4. Draw event markers
-        for event in self._events:
-            event_x = self._frame_to_x(event.get("frame", 0))
-            self._draw_event_marker(event, event_x, bar_center_y)
-        
-        # 5. Draw current position indicator (playhead)
+
+        # 2. Progress fill
         current_x = self._frame_to_x(current_frame)
-        arcade.draw_line(
-            current_x, self.bottom - 2,
-            current_x, self.bottom + self.height + 2,
-            self.COLORS["current_position"], 3
-        )
-        
-        # 6. Draw legend
+        if current_x > self._bar_left:
+            arcade.draw_lrbt_rectangle_filled(self._bar_left, current_x,
+                                              bar_center_y - track_h / 2, bar_center_y + track_h / 2,
+                                              self.COLORS["progress_fill"])
+
+        # 3. Playhead knob
+        arcade.draw_circle_filled(current_x, bar_center_y, 8, (*hud.F1_RED, 90))
+        arcade.draw_circle_filled(current_x, bar_center_y, 5.5, self.COLORS["current_position"])
+
+        # 4. Draw legend
         self._draw_legend(window)
-    
+
+    def _build_static_shapes(self, bar_center_y, track_h):
+        sl = arcade.shape_list
+        bar_right = self._bar_left + self._bar_width
+        yield sl.create_polygon(
+            hud._rounded_points(self._bar_left, bar_center_y - track_h / 2, self._bar_width, track_h, track_h / 2),
+            self.COLORS["background"],
+        )
+        if self._total_laps > 1:
+            for lap in range(1, self._total_laps):
+                lap_x = self._frame_to_x(int((lap / self._total_laps) * self._total_frames))
+                yield sl.create_line(lap_x, bar_center_y - 7, lap_x, bar_center_y + 7, self.COLORS["lap_marker"], 1)
+        for event in self._events:
+            yield from self._event_marker_shapes(event, self._frame_to_x(event.get("frame", 0)))
+
     # 7. Draw tooltips and overlays after the main draw to prevent them being occluded
     def draw_overlays(self, window):
         """Draw tooltips and other overlays that should appear on top of all UI elements."""
@@ -1722,78 +1549,57 @@ class RaceProgressBarComponent(BaseComponent):
         if self._hover_event:
             self._draw_tooltip(window, self._hover_event)
             
-    def _draw_event_marker(self, event: dict, x: float, center_y: float):
-        """Draw a single event marker based on type."""
+    def _event_marker_shapes(self, event: dict, x: float):
+        """Shapes for a single event marker based on type."""
         event_type = event.get("type", "")
         marker_top = self.bottom + self.height + self.marker_height
-        marker_bottom = self.bottom + self.height
-        
+
         if event_type == self.EVENT_DNF:
-            # Draw red X marker above the bar
-            size = 6
+            # Small red X above the bar
+            size = 4
             color = self.COLORS["dnf"]
-            y = marker_top - size
-            arcade.draw_line(x - size, y - size, x + size, y + size, color, 2)
-            arcade.draw_line(x - size, y + size, x + size, y - size, color, 2)
-            
-        elif event_type == self.EVENT_YELLOW_FLAG:
-            # Draw yellow flag indicator on the bar
-            self._draw_flag_segment(event, self.COLORS["yellow_flag"])
-            
-        elif event_type == self.EVENT_RED_FLAG:
-            # Draw red flag indicator on the bar
-            self._draw_flag_segment(event, self.COLORS["red_flag"])
-            
-        elif event_type == self.EVENT_SAFETY_CAR:
-            # Draw orange segment for safety car
-            self._draw_flag_segment(event, self.COLORS["safety_car"])
-            
-        elif event_type == self.EVENT_VSC:
-            # Draw amber segment for VSC
-            self._draw_flag_segment(event, self.COLORS["vsc"])
-            
-    def _draw_flag_segment(self, event: dict, color: tuple):
+            y = marker_top - size - 2
+            yield arcade.shape_list.create_line(x - size, y - size, x + size, y + size, color, 2)
+            yield arcade.shape_list.create_line(x - size, y + size, x + size, y - size, color, 2)
+            return
+
+        color = {
+            self.EVENT_YELLOW_FLAG: self.COLORS["yellow_flag"],
+            self.EVENT_RED_FLAG: self.COLORS["red_flag"],
+            self.EVENT_SAFETY_CAR: self.COLORS["safety_car"],
+            self.EVENT_VSC: self.COLORS["vsc"],
+        }.get(event_type)
+        if color is not None:
+            segment = self._flag_segment_rect(event)
+            if segment:
+                yield arcade.shape_list.create_rectangle_filled(*segment, color)
+
+    def _flag_segment_rect(self, event: dict):
+        """(center_x, center_y, width, height) of a flag period above the bar, or None if not visible."""
         start_frame = event.get("frame", 0)
         end_frame = event.get("end_frame", start_frame + 100)  # default duration
-        
+
         clamped_start = max(0, min(start_frame, self._total_frames))
         clamped_end = max(0, min(end_frame, self._total_frames))
-        
+
         if clamped_start >= clamped_end:
             # after clamping, if start >= end, the segment is fully outside the
             # visible race window (e.g., flag ended before frame 0)
-            return
-        
-        # Convert clamped frames to X positions
-        start_x = self._frame_to_x(clamped_start)
-        end_x = self._frame_to_x(clamped_end)
-        
-        # Additional safety: clamp X positions to bar boundaries.
-        # This provides defense-in-depth against floating-point edge cases
-        # that might otherwise cause slight visual overflow on some platforms
+            return None
+
+        # Convert clamped frames to X positions, clamped to the bar boundaries
         bar_right = self._bar_left + self._bar_width
-        start_x = max(self._bar_left, min(start_x, bar_right))
-        end_x = max(self._bar_left, min(end_x, bar_right))
-        
-        # Calculate segment width with minimum visibility threshold
+        start_x = max(self._bar_left, min(self._frame_to_x(clamped_start), bar_right))
+        end_x = max(self._bar_left, min(self._frame_to_x(clamped_end), bar_right))
+
         segment_width = end_x - start_x
-        
-        # Skip segments with zero or negative visible width after clamping
         if segment_width <= 0:
-            return
-        
+            return None
+
         # Ensure minimum width for visibility (thin flags are hard to see)
         segment_width = max(4, segment_width)
-        
-        # Draw as a thin bar above the main progress bar
-        segment_rect = arcade.XYWH(
-            start_x + segment_width / 2,
-            self.bottom + self.height + 4,
-            segment_width,
-            6
-        )
-        arcade.draw_rect_filled(segment_rect, color)
-        
+        return (start_x + segment_width / 2, self.bottom + self.height + 3, segment_width, 4)
+
     def _draw_tooltip(self, window, event: dict):
         event_type = event.get("type", "")
         label = event.get("label", "")
@@ -1819,55 +1625,35 @@ class RaceProgressBarComponent(BaseComponent):
         tooltip_x = min(max(event_x, 100), window.width - 100)
         tooltip_y = self.bottom + self.height + self.marker_height + 20
         
-        # Draw tooltip background
-        padding = 8
-        text_obj = arcade.Text(tooltip_text, 0, 0, (255, 255, 255), 12)
-        text_width = text_obj.content_width
-        
-        bg_rect = arcade.XYWH(
-            tooltip_x,
-            tooltip_y,
-            text_width + padding * 2,
-            20
-        )
-        arcade.draw_rect_filled(bg_rect, (40, 40, 40, 230))
-        arcade.draw_rect_outline(bg_rect, (100, 100, 100), 1)
-        
-        # Draw text
-        cached_text(
-            tooltip_text,
-            tooltip_x, tooltip_y,
-            (255, 255, 255), 12,
-            anchor_x="center", anchor_y="center"
-        ).draw()
-        
+        # Tooltip as a glass pill
+        label = cached_text(tooltip_text, tooltip_x, tooltip_y, hud.TEXT, 12,
+                            anchor_x="center", anchor_y="center")
+        width = label.content_width + 24
+        hud.draw_panel(tooltip_x - width / 2, tooltip_y - 13, width, 26, radius=13, fill=(20, 22, 29, 240))
+        label.draw()
+
     def _draw_legend(self, window):
         """Draw a small legend explaining the markers."""
         legend_items = [
-            (self.COLORS["yellow_flag"], "■", "Yellow"),
-            (self.COLORS["red_flag"], "■", "Red"),
-            (self.COLORS["safety_car"], "■", "SC"),
-            (self.COLORS["vsc"], "■", "VSC"),
+            (self.COLORS["yellow_flag"], "Yellow"),
+            (self.COLORS["red_flag"], "Red"),
+            (self.COLORS["safety_car"], "SC"),
+            (self.COLORS["vsc"], "VSC"),
         ]
-        
+
         legend_x = self._bar_left + self._bar_width + 50
         legend_y = self.bottom + self.height / 2
-        
-        for i, (color, symbol, label) in enumerate(legend_items):
+
+        for i, (color, label) in enumerate(legend_items):
             x = legend_x + (i * 45)
-            cached_text(
-                symbol,
-                x, legend_y + 2,
-                color, 10, bold=True,
-                anchor_x="center", anchor_y="center"
-            ).draw()
+            arcade.draw_circle_filled(x, legend_y + 4, 3.5, color)
             cached_text(
                 label,
-                x, legend_y - 10,
-                self.COLORS["text"], 8,
+                x, legend_y - 4,
+                self.COLORS["text"], 9,
                 anchor_x="center", anchor_y="top"
             ).draw()
-        
+
     def on_mouse_motion(self, window, x: float, y: float, dx: float, dy: float):
         """Handle mouse motion for hover effects."""
         if not self._visible:
@@ -1995,19 +1781,24 @@ class RaceControlsComponent(BaseComponent):
         self._flash_timer = self._flash_duration
 
     def draw(self, window):
+        """Draw the three playback control buttons."""
         # Skip rendering entirely if hidden
         if not self._visible:
             return
-        """Draw the three playback control buttons."""
         is_paused = getattr(window, 'paused', False)
-        
+
         # Button positions
         rewind_x = self.center_x - self.button_spacing
         play_x = self.center_x
         forward_x = self.center_x + self.button_spacing
-    
+
+        # Glass dock behind the transport buttons
+        dock_w = 2 * self.button_spacing + self.button_size + 24
+        dock_h = self.button_size + 16
+        hud.draw_panel(self.center_x - dock_w / 2, self.center_y - dock_h / 2, dock_w, dock_h, radius=dock_h / 2)
+
         self._draw_rewind_icon(rewind_x, self.center_y)
-        
+
         if is_paused:
             self._draw_play_icon(play_x, self.center_y)
         else:
@@ -2019,123 +1810,94 @@ class RaceControlsComponent(BaseComponent):
 
     def draw_hover_effect(self, button_name: str, x: float, y: float, radius_offset: int = 2, border_width: int = 4):
         """Draw hover outline effect for a button if it's currently hovered."""
+        radius = self.button_size // 2 + radius_offset
         if self.hover_button == button_name and getattr(self, f"{button_name}_rect", None):
-            arcade.draw_circle_outline(x, y, self.button_size // 2 + radius_offset, arcade.color.WHITE, border_width)
-        
+            arcade.draw_circle_outline(x, y, radius, (255, 255, 255, 150), 2)
+
         # Show flash effect for keyboard feedback
         if self._flash_button == button_name and self._flash_timer > 0:
-            # Pulsing ring effect based on timer
-            alpha = int(255 * (self._flash_timer / self._flash_duration))
-            flash_color = (*arcade.color.DIM_GRAY[:3], alpha)
-            arcade.draw_circle_outline(x, y, self.button_size // 2 + radius_offset + 2, flash_color, border_width + 1)
+            # Fading ring based on timer
+            alpha = int(200 * (self._flash_timer / self._flash_duration))
+            arcade.draw_circle_outline(x, y, radius + 2, (*hud.F1_RED, alpha), 3)
+
+    def _button_rect(self, x: float, y: float):
+        half = self.button_size // 2
+        return (x - half, y - half, x + half, y + half)
+
+    def _draw_round_button(self, x: float, y: float, primary: bool = False):
+        r = self.button_size / 2
+        if primary:
+            arcade.draw_circle_filled(x, y, r, hud.F1_RED)
+        else:
+            arcade.draw_circle_filled(x, y, r - 3, (255, 255, 255, 26))
 
     def _draw_play_icon(self, x: float, y: float):
+        self.play_pause_rect = self._button_rect(x, y)
+        self._draw_round_button(x, y, primary=True)
+        s = self.button_size * 0.2
+        arcade.draw_triangle_filled(x - s * 0.7, y - s, x - s * 0.7, y + s, x + s, y, hud.TEXT)
         self.draw_hover_effect('play_pause', x, self.center_y)
-        if 'play' in self._control_textures:
-            texture = self._control_textures['play']
-            rect = arcade.XYWH(x, y, self.button_size, self.button_size)
-            self.play_pause_rect = (x - self.button_size//2, y - self.button_size//2,
-                                   x + self.button_size//2, y + self.button_size//2)
-            arcade.draw_texture_rect(
-                    rect=rect,
-                    texture=texture,
-                    angle=0,
-                    alpha = 255
-                )
+
     def _draw_pause_icon(self, x: float, y: float):
+        self.play_pause_rect = self._button_rect(x, y)
+        self._draw_round_button(x, y, primary=True)
+        s = self.button_size * 0.18
+        arcade.draw_lrbt_rectangle_filled(x - s, x - s * 0.35, y - s, y + s, hud.TEXT)
+        arcade.draw_lrbt_rectangle_filled(x + s * 0.35, x + s, y - s, y + s, hud.TEXT)
         self.draw_hover_effect('play_pause', x, self.center_y)
-        if 'pause' in self._control_textures:
-            texture = self._control_textures['pause']
-            rect = arcade.XYWH(x, y, self.button_size, self.button_size)
-            self.play_pause_rect = (x - self.button_size//2, y - self.button_size//2,
-                                   x + self.button_size//2, y + self.button_size//2)
-            arcade.draw_texture_rect(
-                    rect=rect,
-                    texture=texture,
-                    angle=0,
-                    alpha = 255
-                )
+
+    def _draw_double_arrow(self, x: float, y: float, direction: int):
+        s = self.button_size * 0.15
+        for offset in (-s * 0.85, s * 0.85):
+            cx = x + offset
+            arcade.draw_triangle_filled(cx - direction * s, y - s, cx - direction * s, y + s, cx + direction * s, y, hud.TEXT)
+
     def _draw_forward_icon(self, x: float, y: float):
+        self.forward_rect = self._button_rect(x, y)
+        self._draw_round_button(x, y)
+        self._draw_double_arrow(x, y, 1)
         self.draw_hover_effect('forward', x, self.center_y)
-        if 'rewind' in self._control_textures:
-            texture = self._control_textures['rewind']
-            rect = arcade.XYWH(x, y, self.button_size, self.button_size)
-            self.forward_rect = (x - self.button_size//2, y - self.button_size//2,
-                                x + self.button_size//2, y + self.button_size//2)
-            arcade.draw_texture_rect(
-                    rect=rect,
-                    texture=texture,
-                    angle=180,
-                    alpha = 255
-                )
+
     def _draw_rewind_icon(self, x: float, y: float):
+        self.rewind_rect = self._button_rect(x, y)
+        self._draw_round_button(x, y)
+        self._draw_double_arrow(x, y, -1)
         self.draw_hover_effect('rewind', x, self.center_y)
-        if 'rewind' in self._control_textures:
-            texture = self._control_textures['rewind']
-            rect = arcade.XYWH(x, y, self.button_size, self.button_size)
-            self.rewind_rect = (x - self.button_size//2, y - self.button_size//2,
-                               x + self.button_size//2, y + self.button_size//2)
-            arcade.draw_texture_rect(
-                    rect=rect,
-                    texture=texture,
-                    angle=0,
-                    alpha = 255
-                )
+
     def _draw_speed_comp(self, x: float, y: float, speed: float):
-        """Draw speed multiplier text."""
-        if 'speed+' and 'speed-' in self._control_textures:
-            texture_plus = self._control_textures['speed+']
-            texture_minus = self._control_textures['speed-']
-            
-            # Container dimensions
-            if self._hide_speed_text:
-                container_width = self.button_size * 2.4
-            else:
-                container_width = self.button_size * 3.6
-            container_height = self.button_size * 1.2
-            
-            # Draw container background box
-            rect_container = arcade.XYWH(x, y, container_width, container_height)
-            arcade.draw_rect_filled(rect_container, (40, 40, 40, 200))
+        """Draw the speed multiplier with - / + buttons in a glass pill."""
+        small = self.button_size * 0.7
+        if self._hide_speed_text:
+            container_width = small * 2 + 24
+        else:
+            container_width = small * 2 + 76
+        container_height = self.button_size + 16
+        hud.draw_panel(x - container_width / 2, y - container_height / 2, container_width, container_height,
+                       radius=container_height / 2)
 
-            # Button positions inside container
-            button_offset = (container_width / 2) - (self.button_size / 2) - 5
-            
-            rect_minus = arcade.XYWH(x - button_offset, y, self.button_size, self.button_size)
-            rect_plus = arcade.XYWH(x + button_offset, y, self.button_size, self.button_size)
-            
-            self.speed_decrease_rect = (x - button_offset - self.button_size//2, y - self.button_size//2,
-                                       x - button_offset + self.button_size//2, y + self.button_size//2)
-            self.speed_increase_rect = (x + button_offset - self.button_size//2, y - self.button_size//2,
-                                       x + button_offset + self.button_size//2, y + self.button_size//2)
-            
-            # Draw minus button
-            arcade.draw_texture_rect(
-                    rect=rect_minus,
-                    texture=texture_minus,
-                    angle=0,
-                    alpha=255
-                )
-            
-            # Draw speed text in center
-            if not self._hide_speed_text:
-                cached_text(f"{speed}x", x, y - 5,
-                            arcade.color.WHITE, 11,
-                            anchor_x="center",
-                            bold=True).draw()
-            
-            # Draw plus button
-            arcade.draw_texture_rect(
-                    rect=rect_plus,
-                    texture=texture_plus,
-                    angle=0,
-                    alpha=255
-                )
+        # Button positions inside container
+        button_offset = container_width / 2 - small / 2 - 8
+        minus_x, plus_x = x - button_offset, x + button_offset
 
-            # Draw hover highlights for speed buttons
-            self.draw_hover_effect('speed_increase', rect_plus.center_x, rect_plus.center_y, radius_offset=1, border_width=2)
-            self.draw_hover_effect('speed_decrease', rect_minus.center_x, rect_minus.center_y, radius_offset=1, border_width=2)
-            
+        half = self.button_size // 2
+        self.speed_decrease_rect = (minus_x - half, y - half, minus_x + half, y + half)
+        self.speed_increase_rect = (plus_x - half, y - half, plus_x + half, y + half)
+
+        for bx in (minus_x, plus_x):
+            arcade.draw_circle_filled(bx, y, small / 2, (255, 255, 255, 26))
+        bar = small * 0.32
+        arcade.draw_lrbt_rectangle_filled(minus_x - bar, minus_x + bar, y - 1, y + 1, hud.TEXT)
+        arcade.draw_lrbt_rectangle_filled(plus_x - bar, plus_x + bar, y - 1, y + 1, hud.TEXT)
+        arcade.draw_lrbt_rectangle_filled(plus_x - 1, plus_x + 1, y - bar, y + bar, hud.TEXT)
+
+        # Speed text in the centre
+        if not self._hide_speed_text:
+            cached_text(f"{speed}x", x, y, hud.TEXT, 11, font_name=hud.DISPLAY_FONT,
+                        anchor_x="center", anchor_y="center").draw()
+
+        # Hover highlights for speed buttons
+        self.draw_hover_effect('speed_increase', plus_x, y, radius_offset=-5, border_width=2)
+        self.draw_hover_effect('speed_decrease', minus_x, y, radius_offset=-5, border_width=2)
 
     def on_mouse_motion(self, window, x: float, y: float, dx: float, dy: float):
         """Handle mouse hover effects."""
@@ -2547,6 +2309,25 @@ def plotDRSzones(example_lap):
        drs_zones.append(zone)
    
    return drs_zones
+
+def create_finish_line_shapes(start_inner, start_outer, num_squares=20, extension=20):
+    """Chequered finish line across the track as shapes for a ShapeElementList."""
+    dx = start_outer[0] - start_inner[0]
+    dy = start_outer[1] - start_inner[1]
+    length = np.sqrt(dx**2 + dy**2)
+    if length <= 0:
+        return []
+    dx_norm, dy_norm = dx / length, dy / length
+    x0, y0 = start_inner[0] - extension * dx_norm, start_inner[1] - extension * dy_norm
+    x3, y3 = start_outer[0] + extension * dx_norm, start_outer[1] + extension * dy_norm
+    shapes = []
+    for i in range(num_squares):
+        t1, t2 = i / num_squares, (i + 1) / num_squares
+        color = arcade.color.WHITE if i % 2 == 0 else arcade.color.BLACK
+        shapes.append(arcade.shape_list.create_line(
+            x0 + t1 * (x3 - x0), y0 + t1 * (y3 - y0), x0 + t2 * (x3 - x0), y0 + t2 * (y3 - y0), color, 6))
+    return shapes
+
 
 def draw_finish_line(self, session_type = 'R'):
     if(session_type not in ['R', 'Q']):
