@@ -2,8 +2,24 @@ import numpy as np
 import pandas as pd
 from typing import Dict, Optional, Tuple
 from dataclasses import dataclass
-from scipy import stats
 from enum import Enum
+
+
+def _theilslopes(y, x):
+    """Theil-Sen slope: median of the slopes between every pair of points.
+
+    Same slope as scipy.stats.theilslopes(y, x) (only the slope is used
+    here), without importing scipy.stats, which is slow to load and fit.
+    Returns (slope, None, None, None) to keep the call sites unchanged.
+    """
+    y = np.asarray(y, dtype=float)
+    x = np.asarray(x, dtype=float)
+    deltax = x[:, np.newaxis] - x
+    deltay = y[:, np.newaxis] - y
+    mask = deltax > 0
+    if not mask.any():
+        raise ValueError("All `x` coordinates are identical.")
+    return float(np.median(deltay[mask] / deltax[mask])), None, None, None
 
 class TyreCategory(Enum):
     SLICK = "SLICK"
@@ -189,7 +205,7 @@ class BayesianTyreDegradationModel:
                     delta = fuel_corrected - fuel_corrected.iloc[0]
                     
                     if delta.std() > 0:
-                        slope, _, _, _ = stats.theilslopes(
+                        slope, _, _, _ = _theilslopes(
                             delta.values, 
                             stint_laps['LapOnTyre'].values
                         )
@@ -353,7 +369,7 @@ class BayesianTyreDegradationModel:
                         y = analysis_laps['DeltaFromFirst'].values
                         
                         if len(x) > 0 and np.std(y) > 0:
-                            slope, _, _, _ = stats.theilslopes(y, x)
+                            slope, _, _, _ = _theilslopes(y, x)
                             slope = max(0, slope)
                             
                             if self.config.enable_track_abrasion and self.track_abrasion > 0:

@@ -243,7 +243,7 @@ class F1RaceReplayWindow(arcade.Window):
 
         # Load Background
         bg_path = os.path.join("resources", "background.png")
-        self.bg_texture = arcade.load_texture(bg_path) if os.path.exists(bg_path) else None
+        self.bg_texture = arcade.load_texture(bg_path, hit_box_algorithm=arcade.hitbox.algo_bounding_box) if os.path.exists(bg_path) else None
 
         arcade.set_background_color(arcade.color.BLACK)
 
@@ -1156,12 +1156,15 @@ class F1RaceReplayWindow(arcade.Window):
 
         # Build a time → leader lap lookup from frames
         # (sample every 25th frame for speed; 1 sample per second is plenty)
-        time_to_lap = []
-        for i in range(0, len(frames), 25):
-            f = frames[i]
-            t = f.get("t", 0)
-            lap = f.get("lap", 1)
-            time_to_lap.append((t, int(lap)))
+        if isinstance(frames, FrameStore):
+            time_to_lap = list(zip(frames.t[::25].tolist(), frames.leader_lap[::25].tolist()))
+        else:
+            time_to_lap = []
+            for i in range(0, len(frames), 25):
+                f = frames[i]
+                t = f.get("t", 0)
+                lap = f.get("lap", 1)
+                time_to_lap.append((t, int(lap)))
 
         def _lap_at_time(target_t):
             """Binary-ish lookup for leader lap at a given session time."""

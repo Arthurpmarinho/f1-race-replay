@@ -6,7 +6,6 @@ from datetime import timedelta, date
 from multiprocessing import Pool, cpu_count
 
 import fastf1
-import fastf1.plotting
 import numpy as np
 import pandas as pd
 
@@ -319,6 +318,7 @@ def load_session(year, round_number, session_type="R", telemetry=True):
 
 def get_driver_colors(session):
     try:
+        import fastf1.plotting  # pulls in matplotlib; only needed here
         color_mapping = fastf1.plotting.get_driver_color_mapping(session)
     except (AttributeError, KeyError, TypeError) as exc:
         # FastF1 can fail when its live-timing driver metadata contains a
