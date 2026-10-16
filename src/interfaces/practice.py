@@ -16,6 +16,7 @@ from src.f1_data import get_driver_practice_telemetry
 from src.f1_data import FPS
 from src.lib import hud
 from src.lib.time import format_time
+from src.lib.lap_telemetry import lap_telemetry
 
 SCREEN_WIDTH = 1280
 SCREEN_HEIGHT = 720
@@ -157,7 +158,7 @@ class PracticeReplay(arcade.Window):
                     if driver_laps is not None and len(driver_laps) > 0:
                         fastest = driver_laps.pick_fastest()
                         if fastest is not None:
-                            example_lap = fastest.get_telemetry()
+                            example_lap = lap_telemetry(fastest)
                             break
                 except Exception:
                     continue

@@ -12,6 +12,7 @@ import pandas as pd
 from src.lib.settings import get_settings
 from src.lib.time import parse_time_string
 from src.lib.tyres import get_tyre_compound_int
+from src.lib.lap_telemetry import lap_telemetry
 from src.lib.frames import FrameStore, SC_PHASES, build_frame_store, frame_store_from_dicts
 
 def enable_cache():
@@ -200,7 +201,7 @@ def _process_single_driver(args):
     for _, lap in laps_driver.iterlaps():
         # get telemetry for THIS lap only
         try:
-            lap_tel = lap.get_telemetry()
+            lap_tel = lap_telemetry(lap)
         except KeyError as e:
             # Handle case where FastF1 fails to merge car and position data
             # due to empty position telemetry (missing 'Date' column)
@@ -420,7 +421,7 @@ def get_track_layout(session, year, round_number):
         if quali_session is not None and len(quali_session.laps) > 0:
             fastest_quali = quali_session.laps.pick_fastest()
             if fastest_quali is not None:
-                quali_telemetry = fastest_quali.get_telemetry()
+                quali_telemetry = lap_telemetry(fastest_quali)
                 if 'DRS' in quali_telemetry.columns:
                     example_lap = quali_telemetry
                     print(f"Using qualifying lap from driver {fastest_quali['Driver']} for DRS Zones")
@@ -431,7 +432,7 @@ def get_track_layout(session, year, round_number):
     if example_lap is None:
         fastest_lap = session.laps.pick_fastest()
         if fastest_lap is not None:
-            example_lap = fastest_lap.get_telemetry()
+            example_lap = lap_telemetry(fastest_lap)
             print("Using fastest race lap (DRS detection may use speed-based fallback)")
         else:
             return None, 0.0
@@ -477,7 +478,7 @@ def _compute_safety_car_positions(frames, track_statuses, session):
         if fastest_lap is None:
             print("Safety Car: No fastest lap found, skipping SC position computation")
             return
-        tel = fastest_lap.get_telemetry()
+        tel = lap_telemetry(fastest_lap)
         if tel is None or tel.empty:
             print("Safety Car: No telemetry data, skipping SC position computation")
             return
@@ -1199,7 +1200,7 @@ def get_driver_quali_telemetry(session, driver_code: str, quali_segment: str):
     if fastest_lap is None:
         raise ValueError(f"No valid laps for driver '{driver_code}' in {quali_segment}")
 
-    telemetry = fastest_lap.get_telemetry()
+    telemetry = lap_telemetry(fastest_lap)
 
     # Guard: if telemetry has no time data, return empty
     if (
@@ -1782,7 +1783,7 @@ def get_driver_practice_telemetry(session, session_type=None):
                 continue
 
             # Get telemetry for the best lap
-            tel = best_lap.get_telemetry()
+            tel = lap_telemetry(best_lap)
 
             # Prepare data structure for the interface
             frames = []
