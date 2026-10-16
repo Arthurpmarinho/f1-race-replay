@@ -4,6 +4,7 @@ import threading
 import time
 import numpy as np
 from src.ui_components import (
+    SessionInfoComponent,
     build_track_from_example_lap,
     LapTimeLeaderboardComponent,
     QualifyingSegmentSelectorComponent,
@@ -41,6 +42,10 @@ class QualifyingReplay(arcade.Window):
         self.leaderboard = LapTimeLeaderboardComponent(
             x=LEFT_MARGIN,
         )
+        # Event banner above the charts, the same one the race replay shows
+        self.session_info_comp = SessionInfoComponent()
+        self.session_info_comp.set_from_session(session)
+
         self.race_controls_comp = RaceControlsComponent(
             center_x= self.width // 2 + 100,
             center_y= 40
@@ -220,9 +225,22 @@ class QualifyingReplay(arcade.Window):
         self.screen_inner_points = [self.world_to_screen(x, y) for x, y in self.world_inner_points]
         self.screen_outer_points = [self.world_to_screen(x, y) for x, y in self.world_outer_points]
 
+    def _banner_space(self):
+        """Height taken by the event banner at the top of the chart area."""
+        return 70 if self.session_info_comp.session_info else 0
+
+    def _draw_session_banner(self):
+        # Centred over the charts, to the right of the leaderboard
+        area_left = self.leaderboard.x + getattr(self.leaderboard, "width", 240) + 40
+        area_w = max(10, self.width - RIGHT_MARGIN - area_left)
+        self.session_info_comp.center_x = area_left + area_w / 2
+        self.session_info_comp.width = min(760, area_w)
+        self.session_info_comp.draw(self)
+
     def on_draw(self):
         self.clear()
         hud.draw_backdrop(self)
+        self._draw_session_banner()
 
         # Draw simple line chart if telemetry is loaded
         if self.chart_active and self.loaded_telemetry:
@@ -236,7 +254,7 @@ class QualifyingReplay(arcade.Window):
                 # right-hand area (to the right of leaderboard)
                 area_left = self.leaderboard.x + getattr(self.leaderboard, "width", 240) + 40
                 area_right = self.width - RIGHT_MARGIN
-                area_top = self.height - TOP_MARGIN
+                area_top = self.height - TOP_MARGIN - self._banner_space()
                 area_bottom = BOTTOM_MARGIN
                 area_w = max(10, area_right - area_left)
                 area_h = max(10, area_top - area_bottom)
@@ -272,7 +290,7 @@ class QualifyingReplay(arcade.Window):
                 ctrl_bottom = ctrl_top - ctrl_h
 
                 map_top = ctrl_bottom - 8
-                map_bottom = area_bottom
+                map_bottom = area_bottom + 60  # keep the car label clear of the playback dock
                 map_left = area_left
                 map_right = area_right
                 map_w = max(10, map_right - map_left)

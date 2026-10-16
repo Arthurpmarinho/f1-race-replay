@@ -234,6 +234,28 @@ class WeatherComponent(BaseComponent):
         # Track the bottom of the weather panel so info boxes can stack below it
         window.weather_bottom = bottom
 
+def team_logo_textures(session):
+    """Driver code -> team logo texture for the drivers in a FastF1 session (empty when no logos are present)."""
+    logos = {}
+    results = getattr(session, "results", None)
+    if results is None:
+        return logos
+    textures = {}
+    for _, row in results.iterrows():
+        path = team_logo_path(row.get("TeamName"))
+        if path:
+            if path not in textures:
+                textures[path] = load_ui_texture(path)
+            logos[row.get("Abbreviation")] = textures[path]
+    return logos
+
+
+def draw_team_logo(logo, cx, cy):
+    """Team logo scaled to fit the 22x14 slot in front of a driver code."""
+    scale = min(22 / logo.width, 14 / logo.height)
+    arcade.draw_texture_rect(logo, arcade.XYWH(cx, cy, logo.width * scale, logo.height * scale))
+
+
 class LeaderboardComponent(BaseComponent):
     def __init__(self, x: int, right_margin: int = 260, width: int = 240, visible=True):
         self.x = x
@@ -264,17 +286,7 @@ class LeaderboardComponent(BaseComponent):
         self._display_font = (display_font_family(), "calibri", "arial")
 
     def _load_team_logos(self, window):
-        self._team_logos = {}
-        results = getattr(getattr(window, "session", None), "results", None)
-        if results is None:
-            return
-        textures = {}
-        for _, row in results.iterrows():
-            path = team_logo_path(row.get("TeamName"))
-            if path:
-                if path not in textures:
-                    textures[path] = load_ui_texture(path)
-                self._team_logos[row.get("Abbreviation")] = textures[path]
+        self._team_logos = team_logo_textures(getattr(window, "session", None))
 
     @property
     def visible(self) -> bool:
@@ -430,8 +442,7 @@ class LeaderboardComponent(BaseComponent):
             # Team logo in front of the name, scaled to fit a 22x14 box
             logo = self._team_logos.get(code)
             if logo:
-                scale = min(22 / logo.width, 14 / logo.height)
-                arcade.draw_texture_rect(logo, arcade.XYWH(left_x + 43, cy, logo.width * scale, logo.height * scale))
+                draw_team_logo(logo, left_x + 43, cy)
 
             cached_text(code, name_x, cy, hud.TEXT, 11, font_name=hud.DISPLAY_FONT,
                         anchor_x="left", anchor_y="center").draw()
@@ -600,6 +611,8 @@ class LapTimeLeaderboardComponent(BaseComponent):
         self.row_height = 25
         self._visible = True
         self.title = "Lap Times"
+        self.top = None  # top edge of the panel; defaults to 20px below the window top
+        self._team_logos = None  # driver code -> texture, filled on first draw
 
     def set_entries(self, entries: List[dict]):
         """Accept a list of dicts with keys: pos, code, color, time"""
@@ -625,9 +638,10 @@ class LapTimeLeaderboardComponent(BaseComponent):
         if not self._visible:
             return
         self.selected = getattr(window, "selected_drivers", [])
-        leaderboard_y = window.height - 40
-        rows_top = leaderboard_y - 30
-        panel_top = window.height - 20
+        if self._team_logos is None:
+            self._team_logos = team_logo_textures(getattr(window, "session", None))
+        panel_top = window.height - 20 if self.top is None else self.top
+        rows_top = panel_top - 50
         panel_bottom = rows_top - len(self.entries) * self.row_height - 10
         hud.draw_panel(self.x - 10, panel_bottom, self.width + 20, panel_top - panel_bottom)
         hud.draw_section_title(str(self.title).upper(), self.x + 4, panel_top - 14)
@@ -667,11 +681,14 @@ class LapTimeLeaderboardComponent(BaseComponent):
             # store clickable rect (code, left, bottom, right, top)
             self.rects.append((code, left_x, bottom_y, right_x, top_y))
 
-            # Position, driver name on the left, time on the right
-            driver_name = entry.get('driver_name', code)
+            # Position, team logo and driver code on the left (as in the race leaderboard), time on the right
             cached_text(str(pos), left_x + 16, cy, hud.TEXT_DIM, 12, bold=True,
                         anchor_x="right", anchor_y="center").draw()
-            cached_text(str(driver_name), left_x + 34, cy, hud.TEXT, 13, anchor_x="left", anchor_y="center").draw()
+            logo = self._team_logos.get(code)
+            if logo:
+                draw_team_logo(logo, left_x + 43, cy)
+            cached_text(code, left_x + (58 if self._team_logos else 34), cy, hud.TEXT, 11, font_name=hud.DISPLAY_FONT,
+                        anchor_x="left", anchor_y="center").draw()
             if time_str:
                 cached_text(str(time_str), right_x - 4, cy, hud.TEXT_DIM, 12, font_name=hud.DISPLAY_FONT,
                             anchor_x="right", anchor_y="center").draw()
@@ -1282,11 +1299,16 @@ class SessionInfoComponent(BaseComponent):
         self.visible = visible
         self.session_info = {}
         self._text = arcade.Text("", 0, 0, arcade.color.WHITE, 14)
+        # Horizontal placement; by default the banner is centred between the lap card and the leaderboard
+        self.center_x = None
+        self.width = None
         
     def set_info(self, event_name: str = "", circuit_name: str = "", country: str = "",
-                 year: int = None, round_num: int = None, date: str = "", total_laps: int = None):
+                 year: int = None, round_num: int = None, date: str = "", total_laps: int = None,
+                 session_name: str = ""):
         """Set session information to display"""
         self.session_info = {
+            'session_name': session_name,
             'event_name': event_name,
             'circuit_name': circuit_name,
             'country': country,
@@ -1296,6 +1318,27 @@ class SessionInfoComponent(BaseComponent):
             'total_laps': total_laps
         }
     
+    def set_from_session(self, session):
+        """Fill the banner from a FastF1 session (used by the practice and qualifying windows)."""
+        event = getattr(session, "event", None)
+        if event is None:
+            return
+        when = getattr(session, "date", None) or event.get("EventDate")
+        try:
+            date = when.strftime("%B %d, %Y") if when else ""
+            year = when.year if when else None
+        except (AttributeError, ValueError):
+            date, year = "", None
+        self.set_info(
+            event_name=event.get("EventName", ""),
+            circuit_name=event.get("Location", ""),
+            country=event.get("Country", ""),
+            year=year,
+            round_num=event.get("RoundNumber"),
+            date=date,
+            session_name=getattr(session, "name", "") or "",
+        )
+
     def toggle_visibility(self) -> bool:
         """Toggle visibility of session info banner"""
         self.visible = not self.visible
@@ -1307,8 +1350,8 @@ class SessionInfoComponent(BaseComponent):
         
         # Glass banner between the lap card (left) and the leaderboard (right)
         banner_height = 56
-        banner_width = max(320, min(760, window.width - 2 * 360))
-        center_x = window.width / 2
+        banner_width = self.width or max(320, min(760, window.width - 2 * 360))
+        center_x = window.width / 2 if self.center_x is None else self.center_x
         top_y = window.height - 20
         hud.draw_panel(center_x - banner_width / 2, top_y - banner_height, banner_width, banner_height)
 
@@ -1334,8 +1377,10 @@ class SessionInfoComponent(BaseComponent):
             arcade.draw_lrbt_rectangle_filled(mark_right - 4, mark_right, top_y - 27, top_y - 13, hud.F1_RED)
         title_label.draw()
 
-        # Line 2: Circuit · Country · Year Round X · Date · X Laps
+        # Line 2: Session · Circuit · Country · Year Round X · Date · X Laps
         parts = []
+        if self.session_info.get('session_name'):
+            parts.append(self.session_info['session_name'])
         if circuit and circuit != event:
             parts.append(circuit)
         if country:
