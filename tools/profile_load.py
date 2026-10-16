@@ -86,8 +86,18 @@ def main():
     step("1. Loading the FastF1 session (with telemetry)")
     t0 = time.perf_counter()
     session = load_session(args.year, args.round, session_type)
+    try:
+        session.laps
+    except Exception:
+        session = None
     if session is None:
-        sys.exit("Could not load the session (check the year/round and your internet connection).")
+        from src.lib.settings import get_settings
+        sys.exit(
+            "\nFastF1 could not download this race (every request above failed).\n"
+            "Check that https://livetiming.formula1.com opens in your browser, or\n"
+            "pick a race you have already opened in the app, which loads from the\n"
+            f"FastF1 cache at: {os.path.abspath(get_settings().cache_location)}"
+        )
     print(f"  {time.perf_counter() - t0:.1f}s")
 
     if args.compare_drivers:
